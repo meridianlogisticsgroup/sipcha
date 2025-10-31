@@ -25,11 +25,11 @@ services:
       start_period: 10s
     networks: [dokploy-network]
     expose:
-      - "8000"     # internal-only for Nginx proxy (web) / Traefik
+      - "8000"           # internal for Nginx (web)
     ports:
-      - ":8000"    # optional: publish to a random host port for direct testing
+      - ":8000"          # random host port -> 8000 (direct testing/bypass)
     labels:
-      - "traefik.enable=false"   # keep API internal; Nginx (web) proxies /api -> api
+      - "traefik.enable=false"   # keep API internal; web proxies /api -> api
 
   web-build:
     image: node:20-bookworm-slim
@@ -74,24 +74,36 @@ services:
       retries: 5
     networks: [dokploy-network]
     expose:
-      - "80"       # internal-only for Traefik
+      - "80"             # internal for Traefik
     ports:
-      - ":80"      # optional: publish to a random host port for direct testing
-    # Set HOST in your env or Dokploy UI (e.g., HOST=admin.yourdomain.com)
+      - ":80"            # random host port -> 80 (direct testing/bypass)
+    # Set HOST in env or Dokploy (e.g. HOST=admin.sipcha.io)
     labels:
       - "traefik.enable=true"
       - "traefik.docker.network=dokploy-network"
 
-      # HTTP router -> web service
+      # ---------------------------
+      # 1) PROD: host-based routers
+      # ---------------------------
       - "traefik.http.routers.sipcha-web.rule=Host(`${HOST}`)"
       - "traefik.http.routers.sipcha-web.entrypoints=web"
       - "traefik.http.services.sipcha-web.loadbalancer.server.port=80"
 
-      # Uncomment if your Traefik has TLS (websecure) + certresolver configured
+      # If you have TLS entrypoint:
       # - "traefik.http.routers.sipcha-web-secure.rule=Host(`${HOST}`)"
       # - "traefik.http.routers.sipcha-web-secure.entrypoints=websecure"
       # - "traefik.http.routers.sipcha-web-secure.tls=true"
       # - "traefik.http.routers.sipcha-web-secure.tls.certresolver=letsencrypt"
+
+      # ------------------------------------------------------------
+      # 2) TEST/SAFETY NET: catch-all router (remove for production)
+      # Lets you hit http://<traefik-host>/ and see the app, even if
+      # HOST/DNS aren’t set up yet. Low priority so Host() wins later.
+      # ------------------------------------------------------------
+      - "traefik.http.routers.sipcha-web-catchall.rule=PathPrefix(`/`)"
+      - "traefik.http.routers.sipcha-web-catchall.entrypoints=web"
+      - "traefik.http.routers.sipcha-web-catchall.priority=1"
+      - "traefik.http.routers.sipcha-web-catchall.service=sipcha-web"
 
 networks:
   dokploy-network:
