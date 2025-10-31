@@ -13,23 +13,23 @@ services:
     volumes:
       - ./api/app:/app
       - ./api/requirements.txt:/tmp/requirements.txt:ro
+      # mount built SPA into API container at /app/static
+      - web_dist:/app/static:ro
     command: >
       /bin/sh -lc "pip install --no-cache-dir -r /tmp/requirements.txt &&
       python -m uvicorn app.main:app --host 0.0.0.0 --port 8000"
     healthcheck:
       test: ["CMD", "python", "-c",
-             "import urllib.request,sys; sys.exit(0) if urllib.request.urlopen('http://localhost:8000/healthz',timeout=3).getcode()==200 else sys.exit(1)"]
+             "import urllib.request,sys; sys.exit(0) if urllib.request.urlopen('http://localhost:8000/api/healthz',timeout=3).getcode()==200 else sys.exit(1)"]
       interval: 10s
       timeout: 4s
       retries: 6
       start_period: 10s
     networks: [dokploy-network]
     expose:
-      - "8000"           # internal for Nginx (web)
+      - "8000"
     ports:
-      - ":8000"          # random host port -> 8000 (direct testing/bypass)
-    labels:
-      - "traefik.enable=false"   # keep API internal; web proxies /api -> api
+      - ":8000"    # random host port -> 8000 (direct access)
 
   web-build:
     image: node:20-bookworm-slim
@@ -54,56 +54,6 @@ services:
         ls -la /out
       "
     networks: [dokploy-network]
-
-  web:
-    image: nginx:alpine
-    container_name: sipcha-web
-    restart: always
-    depends_on:
-      web-build:
-        condition: service_completed_successfully
-      api:
-        condition: service_healthy
-    volumes:
-      - web_dist:/usr/share/nginx/html:ro
-      - ./web/nginx.conf:/etc/nginx/nginx.conf:ro
-    healthcheck:
-      test: ["CMD", "sh", "-lc", "[ -f /usr/share/nginx/html/index.html ] && wget -qO- http://localhost/ >/dev/null" ]
-      interval: 15s
-      timeout: 5s
-      retries: 5
-    networks: [dokploy-network]
-    expose:
-      - "80"             # internal for Traefik
-    ports:
-      - ":80"            # random host port -> 80 (direct testing/bypass)
-    # Set HOST in env or Dokploy (e.g. HOST=admin.sipcha.io)
-    labels:
-      - "traefik.enable=true"
-      - "traefik.docker.network=dokploy-network"
-
-      # ---------------------------
-      # 1) PROD: host-based routers
-      # ---------------------------
-      - "traefik.http.routers.sipcha-web.rule=Host(`${HOST}`)"
-      - "traefik.http.routers.sipcha-web.entrypoints=web"
-      - "traefik.http.services.sipcha-web.loadbalancer.server.port=80"
-
-      # If you have TLS entrypoint:
-      # - "traefik.http.routers.sipcha-web-secure.rule=Host(`${HOST}`)"
-      # - "traefik.http.routers.sipcha-web-secure.entrypoints=websecure"
-      # - "traefik.http.routers.sipcha-web-secure.tls=true"
-      # - "traefik.http.routers.sipcha-web-secure.tls.certresolver=letsencrypt"
-
-      # ------------------------------------------------------------
-      # 2) TEST/SAFETY NET: catch-all router (remove for production)
-      # Lets you hit http://<traefik-host>/ and see the app, even if
-      # HOST/DNS aren’t set up yet. Low priority so Host() wins later.
-      # ------------------------------------------------------------
-      - "traefik.http.routers.sipcha-web-catchall.rule=PathPrefix(`/`)"
-      - "traefik.http.routers.sipcha-web-catchall.entrypoints=web"
-      - "traefik.http.routers.sipcha-web-catchall.priority=1"
-      - "traefik.http.routers.sipcha-web-catchall.service=sipcha-web"
 
 networks:
   dokploy-network:

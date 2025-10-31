@@ -1,4 +1,4 @@
-import os, re
+import os, re, pathlib
 from datetime import datetime, timedelta, timezone
 from typing import Optional, List, Dict, Any
 
@@ -8,13 +8,14 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from jose import jwt, JWTError
 from passlib.hash import bcrypt
 from pydantic import BaseModel, Field
-from fastapi.responses import PlainTextResponse, JSONResponse
+from fastapi.responses import PlainTextResponse, JSONResponse, FileResponse, Response
+from fastapi.staticfiles import StaticFiles
 
 from twilio.rest import Client
 
-# --------------------------
+# ==========================
 # Settings / Security
-# --------------------------
+# ==========================
 JWT_SECRET = os.getenv("JWT_SECRET", "change-me")
 JWT_EXPIRE_MINUTES = int(os.getenv("JWT_EXPIRE_MINUTES", "1440"))
 ALGO = "HS256"
@@ -41,9 +42,9 @@ def create_access_token(data: dict, expires_minutes: int = JWT_EXPIRE_MINUTES) -
 def decode_token(token: str) -> dict:
     return jwt.decode(token, JWT_SECRET, algorithms=[ALGO])
 
-# --------------------------
+# ==========================
 # Models
-# --------------------------
+# ==========================
 class LoginIn(BaseModel):
     username: str
     password: str
@@ -67,34 +68,9 @@ class AdminUserOut(BaseModel):
     roles: List[str]
     updated_at: Optional[str] = None
 
-# --------------------------
-# App
-# --------------------------
-app = FastAPI(title="SIPCHA API")
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],  # limit later if exposing API directly
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# --------------------------
-# Root + Health (for quick routing diagnostics)
-# --------------------------
-@app.get("/", response_class=PlainTextResponse)
-def root():
-    # If your domain accidentally points to the API container,
-    # you'll see this plain text immediately instead of a generic 404.
-    return "SIPCHA API OK"
-
-@app.get("/healthz")
-def healthz():
-    return {"ok": True}
-
-# --------------------------
+# ==========================
 # Helpers: Subaccount & Sync
-# --------------------------
+# ==========================
 SYNC_SERVICE_UNIQUE_NAME = "mlg-auth"
 SYNC_MAP_UNIQUE_NAME = "admins"
 AC_SID_RX = re.compile(r"^AC[a-fA-F0-9]{32}$")
@@ -155,9 +131,29 @@ def write_admin_user(client: Client, service_sid: str, username: str, payload: D
     except Exception:
         client.sync.v1.services(service_sid).documents.create(unique_name=key, data=payload)
 
-# --------------------------
-# Auth
-# --------------------------
+# ==========================
+# App structure:
+# - app: main FastAPI serving SPA + mounting API under /api
+# - api_app: all JSON endpoints (what your React calls)
+# ==========================
+app = FastAPI(title="SIPCHA (SPA + API host)")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],   # ok for now; tighten later
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# ---- Mount built SPA assets (built into /app/static by web-build) ----
+STATIC_DIR = pathlib.Path("/app/static")
+ASSETS_DIR = STATIC_DIR / "assets"
+if ASSETS_DIR.exists():
+    app.mount("/assets", StaticFiles(directory=str(ASSETS_DIR)), name="assets")
+
+# ---- Sub-app for the JSON API under /api ----
+api_app = FastAPI(title="SIPCHA API")
+
 def get_current(identity: HTTPAuthorizationCredentials = Depends(security)) -> dict:
     token = identity.credentials
     try:
@@ -165,7 +161,11 @@ def get_current(identity: HTTPAuthorizationCredentials = Depends(security)) -> d
     except JWTError:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
 
-@app.post("/auth/login", response_model=TokenOut)
+@api_app.get("/healthz")
+def healthz():
+    return {"ok": True}
+
+@api_app.post("/auth/login", response_model=TokenOut)
 def login(subaccount: str = Query(..., description="Subaccount FriendlyName or Account SID"), body: LoginIn = Body(...)):
     if not subaccount:
         raise HTTPException(400, "subaccount is required")
@@ -204,7 +204,7 @@ def login(subaccount: str = Query(..., description="Subaccount FriendlyName or A
     )
     return TokenOut(access_token=token)
 
-@app.get("/me", response_model=MeOut)
+@api_app.get("/me", response_model=MeOut)
 def me(ctx: dict = Depends(get_current)):
     return MeOut(
         subaccount_sid=ctx["subaccount_sid"],
@@ -212,10 +212,7 @@ def me(ctx: dict = Depends(get_current)):
         username=ctx["username"],
     )
 
-# --------------------------
-# Admin Users (Sync) CRUD (minimal)
-# --------------------------
-@app.get("/admin/users", response_model=List[AdminUserOut])
+@api_app.get("/admin/users", response_model=List[AdminUserOut])
 def list_admin_users(ctx: dict = Depends(get_current)):
     client = twilio_client_for(ctx["subaccount_sid"])
     service_sid = get_or_create_sync_service(client)
@@ -247,7 +244,7 @@ def list_admin_users(ctx: dict = Depends(get_current)):
             )
     return out
 
-@app.post("/admin/users", response_model=AdminUserOut)
+@api_app.post("/admin/users", response_model=AdminUserOut)
 def create_admin_user(item: AdminUserIn, ctx: dict = Depends(get_current)):
     client = twilio_client_for(ctx["subaccount_sid"])
     service_sid = get_or_create_sync_service(client)
@@ -260,10 +257,7 @@ def create_admin_user(item: AdminUserIn, ctx: dict = Depends(get_current)):
     write_admin_user(client, service_sid, item.username, payload)
     return AdminUserOut(username=item.username, roles=item.roles, updated_at=payload["updated_at"])
 
-# --------------------------
-# Numbers / SIP (read-only to start)
-# --------------------------
-@app.get("/twilio/numbers")
+@api_app.get("/twilio/numbers")
 def list_numbers(ctx: dict = Depends(get_current)):
     client = twilio_client_for(ctx["subaccount_sid"])
     items = []
@@ -279,10 +273,36 @@ def list_numbers(ctx: dict = Depends(get_current)):
         )
     return {"items": items}
 
-@app.get("/twilio/sip/domains")
+@api_app.get("/twilio/sip/domains")
 def list_sip_domains(ctx: dict = Depends(get_current)):
     client = twilio_client_for(ctx["subaccount_sid"])
     items = []
     for d in client.sip.domains.stream():
         items.append({"sid": d.sid, "domain_name": d.domain_name, "friendly_name": d.friendly_name})
     return {"items": items}
+
+# Mount the API under /api
+app.mount("/api", api_app)
+
+# ==========================
+# SPA routes
+# ==========================
+INDEX_FILE = STATIC_DIR / "index.html"
+
+def serve_index() -> Response:
+    if INDEX_FILE.exists():
+        return FileResponse(str(INDEX_FILE))
+    # Helpful message if dist isn’t built yet
+    return PlainTextResponse("SPA not built yet. Run the web-build service.", status_code=503)
+
+# Serve the SPA at root
+@app.get("/", include_in_schema=False)
+def spa_root():
+    return serve_index()
+
+# Serve SPA for any non-API path (React Router paths: /login, /numbers, etc.)
+@app.get("/{full_path:path}", include_in_schema=False)
+def spa_catch_all(full_path: str):
+    # Anything not under /api should return index.html
+    # (FastAPI routing gives precedence to existing /api/* routes above)
+    return serve_index()
