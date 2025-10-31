@@ -1,13 +1,15 @@
 import React from "react";
-import { BrowserRouter, Routes, Route, Link, Outlet, Navigate } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Link, Navigate, useLocation, Outlet } from "react-router-dom";
 import { Refine, DataProvider } from "@refinedev/core";
-import { ThemedLayoutV2, ThemedSiderV2, ThemedHeaderV2 } from "@refinedev/antd";
-import { ConfigProvider, theme } from "antd";
+import { ConfigProvider, Layout, Menu, theme, Typography } from "antd";
 import Dashboard from "./pages/Dashboard";
 import Agents from "./pages/Agents";
 import Numbers from "./pages/Numbers";
 import "antd/dist/reset.css";
 
+const { Header, Sider, Content, Footer } = Layout;
+
+/** ---- In-memory Data Provider (no backend) ---- */
 type Row = Record<string, any>;
 const store: Record<string, Row[]> = {
   agents: [
@@ -51,6 +53,7 @@ const memoryProvider: DataProvider = {
     store[resource] = list;
     return { data: removed };
   },
+  // unused
   getApiUrl: () => "",
   custom: async () => ({ data: [] }),
   createMany: async () => ({ data: [] }),
@@ -58,14 +61,42 @@ const memoryProvider: DataProvider = {
   updateMany: async () => ({ data: [] }),
 };
 
+/** ---- Shell layout (AntD) ---- */
 function Shell() {
+  const location = useLocation();
+  const path = location.pathname;
+  const selected =
+    path.startsWith("/agents") ? ["agents"] :
+    path.startsWith("/numbers") ? ["numbers"] :
+    ["dashboard"];
+
   return (
-    <ThemedLayoutV2
-      Sider={() => <ThemedSiderV2 Title={() => <Link to="/">Sipcha</Link>} />}
-      Header={() => <ThemedHeaderV2 sticky />}
-    >
-      <Outlet />
-    </ThemedLayoutV2>
+    <Layout style={{ minHeight: "100vh" }}>
+      <Sider breakpoint="lg" collapsedWidth={64}>
+        <div style={{ padding: 16, textAlign: "center" }}>
+          <Link to="/" style={{ color: "white", textDecoration: "none", fontWeight: 600 }}>Sipcha</Link>
+        </div>
+        <Menu
+          theme="dark"
+          mode="inline"
+          selectedKeys={selected}
+          items={[
+            { key: "dashboard", label: <Link to="/">Dashboard</Link> },
+            { key: "agents", label: <Link to="/agents">Agents</Link> },
+            { key: "numbers", label: <Link to="/numbers">Numbers</Link> },
+          ]}
+        />
+      </Sider>
+      <Layout>
+        <Header style={{ background: "transparent", padding: "0 16px" }}>
+          <Typography.Title level={4} style={{ color: "white", margin: 0 }}>Admin</Typography.Title>
+        </Header>
+        <Content style={{ padding: 16 }}>
+          <Outlet />
+        </Content>
+        <Footer style={{ textAlign: "center" }}>Sipcha • Refine + Ant Design</Footer>
+      </Layout>
+    </Layout>
   );
 }
 
