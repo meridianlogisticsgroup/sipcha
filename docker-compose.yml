@@ -1,14 +1,15 @@
 services:
   api:
     image: python:3.12-slim
-    container_name: twilio-admin-api
+    container_name: sipcha-api
     restart: always
     environment:
-      JWT_SECRET: "change-me"
-      TWILIO_ACCOUNT_SID: "${TWILIO_ACCOUNT_SID}"
-      TWILIO_AUTH_TOKEN: "${TWILIO_AUTH_TOKEN}"
-      VERIFY_SERVICE_SID: "${VERIFY_SERVICE_SID}"
-      SYNC_SERVICE_SID: "${SYNC_SERVICE_SID}"
+      - JWT_SECRET=change-me
+      # Add later when you wire Twilio:
+      # - TWILIO_ACCOUNT_SID=
+      # - TWILIO_AUTH_TOKEN=
+      # - VERIFY_SERVICE_SID=
+      # - SYNC_SERVICE_SID=
     volumes:
       - ./api/app:/app
       - ./api/requirements.txt:/tmp/requirements.txt:ro
@@ -24,11 +25,12 @@ services:
 
   web-build:
     image: node:20-alpine
-    container_name: twilio-admin-web-build
+    container_name: sipcha-web-build
     working_dir: /src
     volumes:
       - ./web:/src
       - web_dist:/out
+    # use npm install (not ci) unless you commit package-lock.json
     command: >
       sh -lc "npm install &&
       npm run build &&
@@ -38,16 +40,16 @@ services:
 
   web:
     image: nginx:alpine
-    container_name: twilio-admin-web
+    container_name: sipcha-web
     restart: always
     depends_on:
       web-build:
         condition: service_completed_successfully
     volumes:
       - web_dist:/usr/share/nginx/html:ro
-    # you can remove ports if using Dokploy ingress; keeping for quick check:
+    # you can omit ports if using Dokploy ingress; keeping for quick local probe
     ports:
-      - ":80"
+      - "8080:80"
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost/"]
       interval: 15s
