@@ -30,7 +30,10 @@ services:
       - ./web:/src
       - web_dist:/out
     command: >
-      sh -lc "npm ci && npm run build && rm -rf /out/* && cp -r dist/* /out/"
+      sh -lc "npm install &&
+      npm run build &&
+      rm -rf /out/* &&
+      cp -r dist/* /out/"
     networks: [dokploy-network]
 
   web:
