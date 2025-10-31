@@ -1,31 +1,20 @@
 import React from "react";
-import { Refine } from "@refinedev/core";
+import { Refine, Authenticated, ErrorComponent } from "@refinedev/core";
 import { notificationProvider, RefineThemes, ThemedLayoutV2 } from "@refinedev/antd";
 import "@refinedev/antd/dist/reset.css";
-import { ConfigProvider, App as AntdApp, theme as antdTheme, Button } from "antd";
-import { Authenticated, ErrorComponent } from "@refinedev/core";
-import { Outlet, Route, Routes, Navigate, useNavigate } from "react-router-dom";
+import { ConfigProvider, App as AntdApp } from "antd";
+import { Navigate, Outlet, Route, Routes } from "react-router-dom";
 
 import Login from "./pages/Login";
 import Dashboard from "./pages/Dashboard";
-import { isAuthed, logout } from "./auth";
+import Numbers from "./pages/Numbers";
+import SipDomains from "./pages/SipDomains";
+import AdminUsers from "./pages/AdminUsers";
+import { isAuthed } from "./auth";
+import Sidebar from "./components/Sidebar";
 
-const TitleBar: React.FC = () => {
-  const navigate = useNavigate();
-  return (
-    <div style={{display:"flex", justifyContent:"space-between", alignItems:"center", padding:"8px 12px"}}>
-      <div style={{fontWeight:700}}>SIPCHA Admin</div>
-      {isAuthed() && (
-        <Button
-          onClick={() => { logout(); navigate("/login" + window.location.search); }}
-          size="small"
-        >
-          Logout
-        </Button>
-      )}
-    </div>
-  );
-};
+const Protected: React.FC<{ children: React.ReactNode }> = ({ children }) =>
+  isAuthed() ? <>{children}</> : <Navigate to={"/login" + window.location.search} />;
 
 const App: React.FC = () => {
   return (
@@ -33,19 +22,48 @@ const App: React.FC = () => {
       <AntdApp>
         <Refine
           notificationProvider={notificationProvider}
-          Layout={({ children }) => (
-            <ThemedLayoutV2 Title={() => <TitleBar />}>{children}</ThemedLayoutV2>
-          )}
-          resources={[{ name: "dashboard", list: "/"}]}
           options={{ syncWithLocation: true }}
+          resources={[
+            { name: "dashboard", list: "/" },
+            { name: "numbers", list: "/numbers" },
+            { name: "sip-domains", list: "/sip-domains" },
+            { name: "admin-users", list: "/admin-users" },
+          ]}
+          Layout={({ children }) => <ThemedLayoutV2 Sider={() => <Sidebar />}>{children}</ThemedLayoutV2>}
         >
           <Routes>
             <Route
               path="/"
               element={
                 <Authenticated fallback={<Navigate to={"/login" + window.location.search} />}>
-                  <Dashboard />
+                  <Protected>
+                    <Dashboard />
+                  </Protected>
                 </Authenticated>
+              }
+            />
+            <Route
+              path="/numbers"
+              element={
+                <Protected>
+                  <Numbers />
+                </Protected>
+              }
+            />
+            <Route
+              path="/sip-domains"
+              element={
+                <Protected>
+                  <SipDomains />
+                </Protected>
+              }
+            />
+            <Route
+              path="/admin-users"
+              element={
+                <Protected>
+                  <AdminUsers />
+                </Protected>
               }
             />
             <Route path="/login" element={<Login />} />
