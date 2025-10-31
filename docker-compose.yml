@@ -10,10 +10,10 @@ services:
       VARIABLE_NAME: app
       JWT_SECRET: "change-me"
       # Add your Twilio creds later as Dokploy env vars:
-      # TWILIO_ACCOUNT_SID: ""
-      # TWILIO_AUTH_TOKEN: ""
-      # VERIFY_SERVICE_SID: ""
-      # SYNC_SERVICE_SID: ""
+       TWILIO_ACCOUNT_SID: "${TWILIO_ACCOUNT_SID}"
+       TWILIO_AUTH_TOKEN: "${TWILIO_AUTH_TOKEN}"
+       VERIFY_SERVICE_SID: "${VERIFY_SERVICE_SID}"
+       SYNC_SERVICE_SID: "${SYNC_SERVICE_SID}"
     volumes:
       - ./api/app:/app
       - ./api/requirements.txt:/tmp/requirements.txt:ro
