@@ -1,99 +1,107 @@
-import { Refine, useTable } from "@refinedev/core";
-import { BrowserRouter, Routes, Route, Navigate, useNavigate } from "react-router-dom"; // ⬅ add Navigate
 import React from "react";
-import axios from "axios";
+import { BrowserRouter, Routes, Route, Link, Outlet, Navigate } from "react-router-dom";
+import { Refine, DataProvider } from "@refinedev/core";
+import {
+  ThemedLayoutV2,
+  ThemedSiderV2,
+  ThemedHeaderV2,
+  RefineThemes,
+} from "@refinedev/antd";
+import { ConfigProvider, theme } from "antd";
 
-const api = axios.create({ baseURL: "/api" });
+import Dashboard from "./pages/Dashboard";
+import Agents from "./pages/Agents";
+import Numbers from "./pages/Numbers";
 
-function authHeader() {
-  const t = localStorage.getItem("token");
-  return t ? { Authorization: `Bearer ${t}` } : {};
-}
+import "antd/dist/reset.css";
 
-const dataProvider = {
-  getList: async ({ resource }: any) => {
-    try {
-      const res = await api.get(`/${resource}`, { headers: authHeader() });
-      // handle both array and `{data:..., total:...}`
-      const data = Array.isArray(res.data) ? res.data : res.data?.data ?? [];
-      const total = Array.isArray(res.data) ? data.length : res.data?.total ?? data.length;
-      return { data, total };
-    } catch (err: any) {
-      // on 401, return empty list so Refine doesn't explode
-      if (err?.response?.status === 401) return { data: [], total: 0 };
-      throw err;
-    }
+/** --- In-memory store + dataProvider (no backend) --- */
+type Row = Record<string, any>;
+
+const store: Record<string, Row[]> = {
+  agents: [
+    { id: "agent_1", name: "Alice", role: "Admin" },
+    { id: "agent_2", name: "Bob", role: "Agent" },
+  ],
+  numbers: [
+    { id: "num_1", e164: "+1 438-799-6683", label: "Main Line" },
+    { id: "num_2", e164: "+1 604-555-0101", label: "Support" },
+  ],
+};
+
+const memoryProvider: DataProvider = {
+  getList: async ({ resource }) => {
+    const data = store[resource] ?? [];
+    return { data, total: data.length };
   },
-} as any;
+  getOne: async ({ resource, id }) => {
+    const item = (store[resource] ?? []).find((r) => String(r.id) === String(id));
+    if (!item) throw new Error("Not found");
+    return { data: item };
+  },
+  create: async ({ resource, variables }) => {
+    const newItem = { id: crypto.randomUUID(), ...variables };
+    store[resource] = [...(store[resource] ?? []), newItem];
+    return { data: newItem };
+  },
+  update: async ({ resource, id, variables }) => {
+    const list = store[resource] ?? [];
+    const idx = list.findIndex((r) => String(r.id) === String(id));
+    if (idx === -1) throw new Error("Not found");
+    const updated = { ...list[idx], ...variables };
+    store[resource] = [...list.slice(0, idx), updated, ...list.slice(idx + 1)];
+    return { data: updated };
+  },
+  deleteOne: async ({ resource, id }) => {
+    const list = store[resource] ?? [];
+    const idx = list.findIndex((r) => String(r.id) === String(id));
+    if (idx === -1) throw new Error("Not found");
+    const [removed] = list.splice(idx, 1);
+    store[resource] = list;
+    return { data: removed };
+  },
+  // not used for now
+  getApiUrl: () => "",
+  custom: async () => ({ data: [] }),
+  createMany: async () => ({ data: [] }),
+  deleteMany: async () => ({ data: [] }),
+  updateMany: async () => ({ data: [] }),
+};
 
-function Agents() {
-  const { tableQueryResult } = useTable({ resource: "agents" });
-  const items = tableQueryResult.data?.data ?? [];
+/** --- App Shell --- */
+function Shell() {
   return (
-    <div style={{ padding: 16 }}>
-      <h1>Agents</h1>
-      <table>
-        <thead><tr><th>ID</th><th>Name</th></tr></thead>
-        <tbody>{items.map((a: any) => <tr key={a.id}><td>{a.id}</td><td>{a.name}</td></tr>)}</tbody>
-      </table>
-    </div>
+    <ThemedLayoutV2
+      Sider={() => <ThemedSiderV2 Title={({ collapsed }) => <Link to="/">Sipcha</Link>} />}
+      Header={() => <ThemedHeaderV2 sticky />}
+    >
+      <Outlet />
+    </ThemedLayoutV2>
   );
-}
-
-function Login() {
-  const [to, setTo] = React.useState("");
-  const [sent, setSent] = React.useState(false);
-  const [code, setCode] = React.useState("");
-  const nav = useNavigate();
-
-  async function onStart(e: React.FormEvent) {
-    e.preventDefault();
-    await api.post("/auth/request", { to });
-    setSent(true);
-  }
-  async function onVerify(e: React.FormEvent) {
-    e.preventDefault();
-    const { token } = (await api.post("/auth/verify", { to, code })).data;
-    localStorage.setItem("token", token);
-    nav("/", { replace: true });
-  }
-
-  return (
-    <div style={{ padding: 24, maxWidth: 360 }}>
-      <h1>Login</h1>
-      {!sent ? (
-        <form onSubmit={onStart}>
-          <input placeholder="+1..." value={to} onChange={(e)=>setTo(e.target.value)} style={{ width:"100%" }} />
-          <button style={{ marginTop: 12 }}>Send Code</button>
-        </form>
-      ) : (
-        <form onSubmit={onVerify}>
-          <input placeholder="123456" value={code} onChange={(e)=>setCode(e.target.value)} style={{ width:"100%" }} />
-          <button style={{ marginTop: 12 }}>Verify</button>
-        </form>
-      )}
-    </div>
-  );
-}
-
-// ⬇️ Hard guard: don't render children if no token
-function Guard({ children }: { children: React.ReactNode }) {
-  const token = localStorage.getItem("token");
-  if (!token) return <Navigate to="/login" replace />;
-  return <>{children}</>;
 }
 
 export default function App() {
   return (
-    <BrowserRouter>
-      <Refine dataProvider={dataProvider}>
-        <Routes>
-          <Route path="/login" element={<Login />} />
-          <Route path="/" element={<Guard><Agents /></Guard>} />
-          {/* SPA fallback (optional, nice for deep links):
-          <Route path="*" element={<Navigate to="/" replace />} /> */}
-        </Routes>
-      </Refine>
-    </BrowserRouter>
+    <ConfigProvider theme={{ algorithm: theme.darkAlgorithm, token: { borderRadius: 10 }}} >
+      <BrowserRouter>
+        <Refine
+          dataProvider={memoryProvider}
+          resources={[
+            { name: "dashboard", list: "/" },
+            { name: "agents", list: "/agents" },
+            { name: "numbers", list: "/numbers" },
+          ]}
+        >
+          <Routes>
+            <Route element={<Shell />}>
+              <Route index element={<Dashboard />} />
+              <Route path="/agents" element={<Agents />} />
+              <Route path="/numbers" element={<Numbers />} />
+              <Route path="*" element={<Navigate to="/" replace />} />
+            </Route>
+          </Routes>
+        </Refine>
+      </BrowserRouter>
+    </ConfigProvider>
   );
 }
