@@ -1,13 +1,9 @@
-version: "3.9"
-
 services:
   api:
-    image: tiangolo/uvicorn-gunicorn-fastapi:python3.12
+    image: python:3.12-slim
     container_name: twilio-admin-api
     restart: always
     environment:
-      MODULE_NAME: app.main
-      VARIABLE_NAME: app
       JWT_SECRET: "change-me"
       TWILIO_ACCOUNT_SID: "${TWILIO_ACCOUNT_SID}"
       TWILIO_AUTH_TOKEN: "${TWILIO_AUTH_TOKEN}"
@@ -16,15 +12,16 @@ services:
     volumes:
       - ./api/app:/app
       - ./api/requirements.txt:/tmp/requirements.txt:ro
-    command: /bin/sh -lc "pip install --no-cache-dir -r /tmp/requirements.txt && /start.sh"
+    command: >
+      /bin/sh -lc "pip install --no-cache-dir -r /tmp/requirements.txt &&
+      python -m uvicorn app.main:app --host 0.0.0.0 --port 8000"
     healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://localhost/healthz"]
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/healthz"]
       interval: 10s
       timeout: 3s
       retries: 5
     networks: [dokploy-network]
 
-  # One-off build job that writes the compiled site into a named volume
   web-build:
     image: node:20-alpine
     container_name: twilio-admin-web-build
@@ -35,7 +32,6 @@ services:
     command: >
       sh -lc "npm ci && npm run build && rm -rf /out/* && cp -r dist/* /out/"
     networks: [dokploy-network]
-    # You can disable this service after the first deploy if you won't rebuild often.
 
   web:
     image: nginx:alpine
@@ -46,6 +42,7 @@ services:
         condition: service_completed_successfully
     volumes:
       - web_dist:/usr/share/nginx/html:ro
+    # you can remove ports if using Dokploy ingress; keeping for quick check:
     ports:
       - ":80"
     healthcheck:
