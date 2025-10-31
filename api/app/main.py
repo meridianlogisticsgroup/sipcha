@@ -57,27 +57,21 @@ class MeOut(BaseModel):
     subaccount_sid: str
     subaccount_name: str
     username: str
-    roles: List[str] = Field(default_factory=list)
-    phone: Optional[str] = None
 
 class AdminUserIn(BaseModel):
     username: str
     password: str
     roles: List[str] = Field(default_factory=lambda: ["admin"])
-    phone: Optional[str] = None
 
 class AdminUserOut(BaseModel):
     username: str
     roles: List[str]
     updated_at: Optional[str] = None
-    phone: Optional[str] = None
 
 # ==========================
 # Helpers: Subaccount & Sync
 # ==========================
-# Keep both names as candidates so API can read existing records created by the Function.
-SYNC_SERVICE_CANDIDATE_UNIQUE = ["sipcha-admins", "mlg-auth", "default"]
-SYNC_SERVICE_CANDIDATE_FRIENDLY = ["sipcha-admins", "MLG Auth Service", "Default Service"]
+SYNC_SERVICE_NAME = "sipcha-admins"
 SYNC_MAP_UNIQUE_NAME = "admins"
 AC_SID_RX = re.compile(r"^AC[a-fA-F0-9]{32}$")
 
@@ -96,21 +90,35 @@ def get_subaccount_by_sid(client: Client, sid: str) -> Optional[Dict[str, Any]]:
         pass
     return None
 
+def _choose_consistent_sync_service_sid(services: List[Any]) -> Optional[str]:
+    """
+    Given a list of service records (already filtered to name matches),
+    return a stable choice: prefer unique_name matches, then friendly matches;
+    within each group, pick lowest SID for stability.
+    """
+    def key_sid(svc): return getattr(svc, "sid", "")
+    uniques = [s for s in services if (getattr(s, "unique_name", "") or "").strip() == SYNC_SERVICE_NAME]
+    if uniques:
+        return sorted(uniques, key=key_sid)[0].sid
+    friendly = [s for s in services if (getattr(s, "friendly_name", "") or "").strip() == SYNC_SERVICE_NAME]
+    if friendly:
+        return sorted(friendly, key=key_sid)[0].sid
+    return None
+
 def get_or_attach_existing_sync_service(client: Client) -> Optional[str]:
-    # Prefer an existing service named "sipcha-admins" (either unique_name or friendly_name).
+    matches = []
     for svc in client.sync.v1.services.stream():
         uname = (getattr(svc, "unique_name", None) or "").strip()
         fname = (getattr(svc, "friendly_name", None) or "").strip()
-        if uname in SYNC_SERVICE_CANDIDATE_UNIQUE or fname in SYNC_SERVICE_CANDIDATE_FRIENDLY:
-            return svc.sid
-    return None
+        if uname == SYNC_SERVICE_NAME or fname == SYNC_SERVICE_NAME:
+            matches.append(svc)
+    return _choose_consistent_sync_service_sid(matches)
 
 def get_or_create_sync_service(client: Client) -> str:
     sid = get_or_attach_existing_sync_service(client)
     if sid:
         return sid
-    # Create consistently: unique_name=friendly_name="sipcha-admins"
-    svc = client.sync.v1.services.create(unique_name="sipcha-admins", friendly_name="sipcha-admins")
+    svc = client.sync.v1.services.create(unique_name=SYNC_SERVICE_NAME, friendly_name=SYNC_SERVICE_NAME)
     return svc.sid
 
 def ensure_sync_map(client: Client, service_sid: str) -> None:
@@ -120,22 +128,28 @@ def ensure_sync_map(client: Client, service_sid: str) -> None:
     client.sync.v1.services(service_sid).sync_maps.create(unique_name=SYNC_MAP_UNIQUE_NAME, ttl=0)
 
 def read_admin_user(client: Client, service_sid: str, username: str) -> Optional[Dict[str, Any]]:
-    # Try the map item in the selected service
     try:
         mitem = client.sync.v1.services(service_sid).sync_maps(SYNC_MAP_UNIQUE_NAME).sync_map_items(username).fetch()
         if mitem and mitem.data:
             return mitem.data
     except Exception:
         pass
-    # As a fallback, scan others quickly in case data was written into a different service.
+    # Fallback scan (in case of legacy stray services); normalized selection still applies.
     try:
+        matches = []
         for svc in client.sync.v1.services.stream():
+            uname = (getattr(svc, "unique_name", "") or "").strip()
+            fname = (getattr(svc, "friendly_name", "") or "").strip()
+            if uname == SYNC_SERVICE_NAME or fname == SYNC_SERVICE_NAME:
+                matches.append(svc)
+        chosen_sid = _choose_consistent_sync_service_sid(matches)
+        if chosen_sid:
             try:
-                item = client.sync.v1.services(svc.sid).sync_maps(SYNC_MAP_UNIQUE_NAME).sync_map_items(username).fetch()
+                item = client.sync.v1.services(chosen_sid).sync_maps(SYNC_MAP_UNIQUE_NAME).sync_map_items(username).fetch()
                 if item and item.data:
                     return item.data
             except Exception:
-                continue
+                pass
     except Exception:
         pass
     return None
@@ -149,21 +163,20 @@ def write_admin_user(client: Client, service_sid: str, username: str, payload: D
 # ==========================
 # App structure:
 # - app: main FastAPI serving SPA + mounting API under /api
-# - api_app: all JSON endpoints (what your React calls)
+# - api_app: all JSON endpoints
 # ==========================
 app = FastAPI(title="SIPCHA (SPA + API host)")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],   # tighten later
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# ---- Mount built SPA assets (built into /app/static by web-build) ----
+# ---- Mount built SPA assets (/app/static from web-build) ----
 STATIC_DIR = pathlib.Path("/app/static")
 ASSETS_DIR = STATIC_DIR / "assets"
-# Mount even if it doesn't exist yet; it will work as soon as the build writes files.
 app.mount("/assets", StaticFiles(directory=str(ASSETS_DIR), check_dir=False), name="assets")
 
 # ---- Sub-app for the JSON API under /api ----
@@ -198,15 +211,15 @@ def login(subaccount: str = Query(..., description="Subaccount FriendlyName or A
 
     sub_client = twilio_client_for(sa["sid"])
 
-    # Align with Function / existing data
-    service_sid = get_or_create_sync_service(sub_client)  # prefers/uses "sipcha-admins"
+    # Deterministic service + map
+    service_sid = get_or_create_sync_service(sub_client)
     ensure_sync_map(sub_client, service_sid)
 
     rec = read_admin_user(sub_client, service_sid, body.username)
     if not rec:
         raise HTTPException(401, "Invalid username or password")
 
-    # Accept both shapes: password_hash (snake_case) or passwordHash (camelCase)
+    # Accept camelCase or snake_case
     pwd_hash = rec.get("password_hash") or rec.get("passwordHash")
     if not pwd_hash or not bcrypt.verify(body.password, pwd_hash):
         raise HTTPException(401, "Invalid username or password")
@@ -215,23 +228,12 @@ def login(subaccount: str = Query(..., description="Subaccount FriendlyName or A
     if not isinstance(roles, list):
         roles = ["admin"]
 
-    # Auto-promote seed 'admin' to superadmin if not already
-    if body.username == "admin" and "superadmin" not in roles:
-        roles = sorted(list(set(roles + ["superadmin", "admin"])))
-        updated = dict(rec)
-        updated["roles"] = roles
-        # normalize key name for hash on write
-        if "passwordHash" in updated and "password_hash" not in updated:
-            updated["password_hash"] = updated["passwordHash"]
-        write_admin_user(sub_client, service_sid, body.username, updated)
-
     token = create_access_token(
         {
             "subaccount_sid": sa["sid"],
             "subaccount_name": sa["friendly_name"],
             "username": body.username,
             "roles": roles or ["admin"],
-            "phone": rec.get("phone"),
         }
     )
     return TokenOut(access_token=token)
@@ -242,8 +244,6 @@ def me(ctx: dict = Depends(get_current)):
         subaccount_sid=ctx["subaccount_sid"],
         subaccount_name=ctx["subaccount_name"],
         username=ctx["username"],
-        roles=ctx.get("roles", []),
-        phone=ctx.get("phone"),
     )
 
 @api_app.get("/admin/users", response_model=List[AdminUserOut])
@@ -260,7 +260,6 @@ def list_admin_users(ctx: dict = Depends(get_current)):
                     username=item.key,
                     roles=data.get("roles", ["admin"]),
                     updated_at=str(getattr(item, "date_updated", "") or ""),
-                    phone=data.get("phone"),
                 )
             )
         if out:
@@ -274,26 +273,13 @@ def create_admin_user(item: AdminUserIn, ctx: dict = Depends(get_current)):
     client = twilio_client_for(ctx["subaccount_sid"])
     service_sid = get_or_create_sync_service(client)
     ensure_sync_map(client, service_sid)
-
-    # Be lenient if UI posts a comma-separated string for roles
-    roles: List[str]
-    if isinstance(item.roles, list):
-        roles = item.roles
-    elif isinstance(item.roles, str):
-        parts = [p.strip() for p in item.roles.split(",")]
-        roles = [p for p in parts if p] or ["admin"]
-    else:
-        roles = ["admin"]
-
     payload = {
-        # write snake_case; Function writes camelCase — login accepts both
         "password_hash": bcrypt.hash(item.password),
-        "roles": roles,
+        "roles": item.roles,
         "updated_at": datetime.utcnow().isoformat() + "Z",
-        "phone": (item.phone or "").strip() or None,
     }
     write_admin_user(client, service_sid, item.username, payload)
-    return AdminUserOut(username=item.username, roles=roles, updated_at=payload["updated_at"], phone=payload["phone"])
+    return AdminUserOut(username=item.username, roles=item.roles, updated_at=payload["updated_at"])
 
 @api_app.get("/twilio/numbers")
 def list_numbers(ctx: dict = Depends(get_current)):

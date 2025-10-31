@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from "react";
-import { Table, Typography, Button, Modal, Form, Input, Space, message, Tag } from "antd";
+import { Table, Typography, Button, Modal, Form, Input, Space, message, Tag, Card } from "antd";
 import { api } from "../auth";
 
-const { Title } = Typography;
+const { Title, Paragraph } = Typography;
 
 type Row = { username: string; roles: string[]; updated_at?: string; phone?: string };
 
@@ -17,6 +17,8 @@ const AdminUsers: React.FC = () => {
     try {
       const res = await api.get("/admin/users");
       setRows(res.data || []);
+    } catch (e: any) {
+      message.error(e?.response?.data?.detail || "Failed to load admins");
     } finally {
       setLoading(false);
     }
@@ -40,31 +42,34 @@ const AdminUsers: React.FC = () => {
   };
 
   return (
-    <Space direction="vertical" style={{ width: "100%" }}>
-      <Space style={{ width: "100%", justifyContent: "space-between" }}>
-        <Title level={3} style={{ margin: 0 }}>
-          Admin Users
-        </Title>
-        <Button type="primary" onClick={() => setOpen(true)}>
-          New Admin
-        </Button>
-      </Space>
-
-      <Table
-        rowKey="username"
-        loading={loading}
-        dataSource={rows}
-        columns={[
-          { title: "Username", dataIndex: "username" },
-          { title: "Phone", dataIndex: "phone" },
-          {
-            title: "Roles",
-            dataIndex: "roles",
-            render: (roles: string[]) => roles?.map((r) => <Tag key={r}>{r}</Tag>),
-          },
-          { title: "Updated", dataIndex: "updated_at" },
-        ]}
-      />
+    <Space direction="vertical" style={{ width: "100%" }} size="large">
+      <Title level={3} style={{ margin: 0 }}>Admin Provisioning</Title>
+      <Card>
+        <Paragraph type="secondary" style={{ marginBottom: 16 }}>
+          As <b>Super Admin</b>, your only responsibility is to create and manage admin users.
+          Each admin must have a phone number for SMS-based 2FA and password reset.
+        </Paragraph>
+        <Space style={{ width: "100%", justifyContent: "space-between", marginBottom: 12 }}>
+          <div />
+          <Button type="primary" onClick={() => setOpen(true)}>New Admin</Button>
+        </Space>
+        <Table
+          rowKey="username"
+          loading={loading}
+          dataSource={rows}
+          pagination={{ pageSize: 10 }}
+          columns={[
+            { title: "Username", dataIndex: "username" },
+            { title: "Phone", dataIndex: "phone", render: (v) => v || <span style={{color:"#999"}}>—</span> },
+            {
+              title: "Roles",
+              dataIndex: "roles",
+              render: (roles: string[]) => (roles?.length ? roles.map((r) => <Tag key={r}>{r}</Tag>) : <span style={{color:"#999"}}>—</span>),
+            },
+            { title: "Updated", dataIndex: "updated_at" },
+          ]}
+        />
+      </Card>
 
       <Modal title="Create Admin User" open={open} onOk={onCreate} onCancel={() => setOpen(false)}>
         <Form layout="vertical" form={form}>

@@ -40,6 +40,7 @@ const Sidebar: React.FC = () => {
             </Menu.Item>
           </>
         )}
+        {/* Superadmin and regular admins both see Admin Users, but only superadmin can use it (API-guarded). */}
         <Menu.Item key="/admin-users" icon={<TeamOutlined />}>
           <Link to="/admin-users">Admin Users</Link>
         </Menu.Item>
