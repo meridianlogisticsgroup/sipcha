@@ -4,9 +4,7 @@ import { Card, Table, Typography } from "antd";
 
 export default function Agents() {
   const { tableQueryResult } = useTable({ resource: "agents" });
-
   const data = tableQueryResult?.data?.data ?? [];
-
   return (
     <Card>
       <Typography.Title level={3}>Agents</Typography.Title>
