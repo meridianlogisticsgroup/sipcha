@@ -8,6 +8,7 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from jose import jwt, JWTError
 from passlib.hash import bcrypt
 from pydantic import BaseModel, Field
+from fastapi.responses import PlainTextResponse, JSONResponse
 
 from twilio.rest import Client
 
@@ -72,11 +73,24 @@ class AdminUserOut(BaseModel):
 app = FastAPI(title="SIPCHA API")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # safe due to same-origin proxying, lock down later if exposing directly
+    allow_origins=["*"],  # limit later if exposing API directly
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# --------------------------
+# Root + Health (for quick routing diagnostics)
+# --------------------------
+@app.get("/", response_class=PlainTextResponse)
+def root():
+    # If your domain accidentally points to the API container,
+    # you'll see this plain text immediately instead of a generic 404.
+    return "SIPCHA API OK"
+
+@app.get("/healthz")
+def healthz():
+    return {"ok": True}
 
 # --------------------------
 # Helpers: Subaccount & Sync
@@ -151,29 +165,18 @@ def get_current(identity: HTTPAuthorizationCredentials = Depends(security)) -> d
     except JWTError:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
 
-@app.get("/healthz")
-def healthz():
-    return {"ok": True}
-
 @app.post("/auth/login", response_model=TokenOut)
 def login(subaccount: str = Query(..., description="Subaccount FriendlyName or Account SID"), body: LoginIn = Body(...)):
-    """
-    Accepts either:
-      - FriendlyName (exact match)
-      - Account SID (ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx)
-    Then authenticates against Sync Service 'mlg-auth' → Sync Map 'admins' (key=username),
-    falling back to legacy Document 'admin:{username}'.
-    """
     if not subaccount:
         raise HTTPException(400, "subaccount is required")
 
-    root = twilio_client_for()
+    root_client = twilio_client_for()
 
     # Resolve subaccount
     if AC_SID_RX.match(subaccount):
-        sa = get_subaccount_by_sid(root, subaccount)
+        sa = get_subaccount_by_sid(root_client, subaccount)
     else:
-        sa = find_subaccount_by_name(root, subaccount)
+        sa = find_subaccount_by_name(root_client, subaccount)
 
     if not sa:
         raise HTTPException(404, f"Subaccount '{subaccount}' not found")
