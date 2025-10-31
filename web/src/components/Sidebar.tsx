@@ -6,7 +6,6 @@ import {
   CloudServerOutlined,
   TeamOutlined,
   DashboardOutlined,
-  CrownOutlined,
 } from "@ant-design/icons";
 
 const { Sider } = Layout;
@@ -21,9 +20,10 @@ const Sidebar: React.FC = () => {
 
   return (
     <Sider width={240} breakpoint="lg" collapsedWidth={64}>
-      <div style={{ color: "white", padding: 16, fontWeight: 800, letterSpacing: 0.5, display: "flex", gap: 8, alignItems: "center" }}>
-        <CrownOutlined style={{ fontSize: 18 }} />
-        <Typography.Text style={{ color: "white", fontWeight: 800 }}>SIPCHA</Typography.Text>
+      <div style={{ color: "white", padding: 16, fontWeight: 800, letterSpacing: 0.5 }}>
+        <Typography.Text style={{ color: "white", fontWeight: 800 }}>
+          SIPCHA
+        </Typography.Text>
       </div>
       <Menu theme="dark" mode="inline" selectedKeys={selected} style={{ borderRight: 0 }}>
         {!isSuper && (

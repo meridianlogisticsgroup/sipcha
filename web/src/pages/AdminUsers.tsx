@@ -10,13 +10,13 @@ import {
   message,
   Tag,
   Card,
-  Alert,
   Tooltip,
+  Divider,
 } from "antd";
-import { PlusOutlined, ReloadOutlined, PhoneOutlined } from "@ant-design/icons";
+import { PlusOutlined, ReloadOutlined, PhoneOutlined, SearchOutlined } from "@ant-design/icons";
 import { api } from "../auth";
 
-const { Title, Text, Paragraph } = Typography;
+const { Title, Text } = Typography;
 
 type Row = { username: string; roles: string[]; updated_at?: string; phone?: string };
 
@@ -27,6 +27,8 @@ const AdminUsers: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [open, setOpen] = useState(false);
   const [form] = Form.useForm();
+  const [q, setQ] = useState("");
+
   const roles = useMemo(() => {
     try { return JSON.parse(localStorage.getItem("roles") || "[]") as string[]; } catch { return []; }
   }, []);
@@ -36,23 +38,27 @@ const AdminUsers: React.FC = () => {
     setLoading(true);
     try {
       const res = await api.get("/admin/users");
-      setRows((res.data || []).sort((a: Row, b: Row) => a.username.localeCompare(b.username)));
+      const data: Row[] = res.data || [];
+      setRows(
+        data
+          .sort((a, b) => a.username.localeCompare(b.username))
+          .filter((r) => (q ? r.username.toLowerCase().includes(q.toLowerCase()) : true))
+      );
     } finally {
       setLoading(false);
     }
   };
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); }, [q]);
 
   const onCreate = async () => {
     const values = await form.validateFields();
     try {
-      // Superadmin provisions *regular* admins by default
       const payload = {
         username: values.username,
         password: values.password,
         phone: values.phone || undefined,
-        roles: ["admin"],
+        roles: ["admin"], // superadmin only provisions regular admins
       };
       await api.post("/admin/users", payload);
       message.success("Admin user created");
@@ -66,23 +72,22 @@ const AdminUsers: React.FC = () => {
 
   return (
     <Space direction="vertical" style={{ width: "100%" }} size={16}>
-      <Card bordered style={{ borderRadius: 12 }}>
-        <Title level={3} style={{ margin: 0 }}>
-          {isSuper ? "Admin Provisioning" : "Admins"}
-        </Title>
-        <Paragraph type="secondary" style={{ marginTop: 8 }}>
-          {isSuper ? (
-            <>
-              As <b>Super Admin</b>, your only responsibility is to create and manage admin users. Each admin should have a
-              phone number for SMS-based 2FA and password reset.
-            </>
-          ) : (
-            <>Manage admin users for this subaccount.</>
-          )}
-        </Paragraph>
+      <Title level={2} style={{ margin: 0 }}>
+        {isSuper ? "Admin Provisioning" : "Admins"}
+      </Title>
 
-        <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 12 }}>
-          <div />
+      <Card>
+        <Space style={{ width: "100%", justifyContent: "space-between" }} wrap>
+          <Space>
+            <Input
+              allowClear
+              prefix={<SearchOutlined />}
+              placeholder="Search username..."
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              style={{ width: 260 }}
+            />
+          </Space>
           <Space>
             <Tooltip title="Refresh">
               <Button icon={<ReloadOutlined />} onClick={load} />
@@ -91,7 +96,9 @@ const AdminUsers: React.FC = () => {
               New Admin
             </Button>
           </Space>
-        </div>
+        </Space>
+
+        <Divider style={{ margin: "12px 0" }} />
 
         <Table<Row>
           rowKey="username"
@@ -100,13 +107,12 @@ const AdminUsers: React.FC = () => {
           bordered
           size="middle"
           pagination={{ pageSize: 10, showSizeChanger: false }}
-          sticky
           columns={[
-            { title: "Username", dataIndex: "username", width: 220 },
+            { title: "Username", dataIndex: "username", width: 220, ellipsis: true },
             {
               title: "Phone",
               dataIndex: "phone",
-              width: 220,
+              width: 240,
               render: (v: string | undefined) =>
                 v ? (
                   <Space><PhoneOutlined /> <Text>{v}</Text></Space>
@@ -127,16 +133,6 @@ const AdminUsers: React.FC = () => {
             { title: "Updated", dataIndex: "updated_at", width: 260 },
           ]}
         />
-
-        {isSuper && (
-          <Alert
-            style={{ marginTop: 12 }}
-            type="info"
-            message="Tip"
-            description="Create regular admin users here. Super Admin is only for provisioning and should not be used for day-to-day operations."
-            showIcon
-          />
-        )}
       </Card>
 
       <Modal
