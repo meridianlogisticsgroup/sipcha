@@ -25,18 +25,18 @@ services:
 
   web-build:
     image: node:20-alpine
+    container_name: sipcha-web-build
     working_dir: /src
     volumes:
       - ./web:/src
       - web_dist:/out
+    # use npm install (not ci) unless you commit package-lock.json
     command: >
-      sh -lc "node -v && npm -v &&
-      ls -la && echo '--- src ---' && ls -la src || true &&
-      npm install &&
+      sh -lc "npm install &&
       npm run build &&
-      mkdir -p /out &&
       rm -rf /out/* &&
       cp -r dist/* /out/"
+    networks: [dokploy-network]
 
   web:
     image: nginx:alpine
