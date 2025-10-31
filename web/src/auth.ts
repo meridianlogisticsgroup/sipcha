@@ -6,7 +6,6 @@ export const api = axios.create({
   baseURL: API_URL,
 });
 
-// Attach token automatically
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem("token");
   if (token) {
@@ -16,7 +15,6 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
-// Simple helpers
 export function getSubaccountFromURL(): string | null {
   const url = new URL(window.location.href);
   return url.searchParams.get("subaccount");
