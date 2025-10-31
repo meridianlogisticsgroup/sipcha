@@ -44,7 +44,7 @@ const HeaderBar: React.FC<{
         display: "flex",
         alignItems: "center",
         justifyContent: "space-between",
-        padding: "0 12px",
+        paddingInline: 12,
         gap: 16,
       }}
     >
@@ -55,7 +55,7 @@ const HeaderBar: React.FC<{
           icon={collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
           onClick={onToggleSider}
         />
-        <Text strong style={{ letterSpacing: 0.3 }}>SIPCHA Admin</Text>
+        <Text strong>SIPCHA Admin</Text>
       </Space>
 
       <Space size="middle">
@@ -70,12 +70,20 @@ const HeaderBar: React.FC<{
             items: [
               { key: "user", icon: <UserOutlined />, label: me?.username || "User" },
               { type: "divider" },
-              { key: "logout", icon: <LogoutOutlined />, label: "Logout", onClick: () => { logout(); window.location.href = "/login" + window.location.search; } },
+              {
+                key: "logout",
+                icon: <LogoutOutlined />,
+                label: "Logout",
+                onClick: () => {
+                  logout();
+                  window.location.href = "/login" + window.location.search;
+                },
+              },
             ],
           }}
         >
           <Space style={{ cursor: "pointer" }}>
-            <Text type="secondary" style={{ fontSize: 12 }}>{me ? me.subaccount_name : ""}</Text>
+            <Text type="secondary" style={{ fontSize: 12 }}>{me?.subaccount_name || ""}</Text>
             <Avatar size="small">{initials(me?.username)}</Avatar>
           </Space>
         </Dropdown>

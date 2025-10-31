@@ -27,7 +27,7 @@ const Sidebar: React.FC<{
       collapsedWidth={64}
       breakpoint="lg"
     >
-      <div style={{ color: "white", padding: 16, fontWeight: 800, letterSpacing: 0.5 }}>
+      <div style={{ color: "white", padding: 16 }}>
         <Typography.Text style={{ color: "white", fontWeight: 800 }}>SIPCHA</Typography.Text>
       </div>
       <Menu theme="dark" mode="inline" selectedKeys={selected} style={{ borderRight: 0 }}>

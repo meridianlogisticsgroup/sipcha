@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { Refine, Authenticated, ErrorComponent } from "@refinedev/core";
 import { notificationProvider, RefineThemes, ThemedLayoutV2 } from "@refinedev/antd";
 import "@refinedev/antd/dist/reset.css";
-import { ConfigProvider, App as AntdApp, theme, Skeleton, Grid } from "antd";
+import { ConfigProvider, App as AntdApp, theme, Skeleton } from "antd";
 import { Navigate, Outlet, Route, Routes } from "react-router-dom";
 
 import Login from "./pages/Login";
@@ -10,6 +10,7 @@ import Dashboard from "./pages/Dashboard";
 import Numbers from "./pages/Numbers";
 import SipDomains from "./pages/SipDomains";
 import AdminUsers from "./pages/AdminUsers";
+
 import Sidebar from "./components/Sidebar";
 import HeaderBar from "./components/HeaderBar";
 import { api } from "./auth";
@@ -22,16 +23,7 @@ const App: React.FC = () => {
   const [mode, setMode] = useState<"light" | "dark">(
     (localStorage.getItem("theme") as "light" | "dark") || "light"
   );
-
-  // --- Responsive Sider state ---
-  const screens = Grid.useBreakpoint();
-  const belowLg = !screens.lg; // lg ~= 992px
-  const [collapsed, setCollapsed] = useState<boolean>(belowLg);
-
-  useEffect(() => {
-    // auto-collapse when viewport drops below lg; expand back when >= lg
-    setCollapsed(belowLg);
-  }, [belowLg]);
+  const [collapsed, setCollapsed] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -44,7 +36,7 @@ const App: React.FC = () => {
         setMe(res.data);
         localStorage.setItem("roles", JSON.stringify(res.data.roles || []));
       } catch {
-        // ignore
+        // ignore errors; show layout anyway so user can log out
       } finally {
         setLoading(false);
       }
@@ -66,14 +58,14 @@ const App: React.FC = () => {
     ];
   }, [isSuper]);
 
-  const RootElement = isSuper ? <Navigate to="/admin-users" replace /> : <Dashboard />;
-
   return (
     <ConfigProvider
       theme={{
         algorithm: mode === "dark" ? theme.darkAlgorithm : theme.defaultAlgorithm,
-        token: { colorPrimary: RefineThemes.Blue.token.colorPrimary, borderRadius: 12 },
-        components: { Card: { padding: 16, borderRadiusLG: 16 } },
+        token: {
+          ...RefineThemes.Blue.token,
+          borderRadius: 12,
+        },
       }}
     >
       <AntdApp>
@@ -83,9 +75,12 @@ const App: React.FC = () => {
           resources={resources}
           Layout={({ children }) =>
             loading ? (
-              <div style={{ padding: 24 }}><Skeleton active paragraph={{ rows: 6 }} /></div>
+              <div style={{ padding: 24 }}>
+                <Skeleton active paragraph={{ rows: 8 }} />
+              </div>
             ) : (
               <ThemedLayoutV2
+                // these ALWAYS render
                 Sider={() => (
                   <Sidebar
                     collapsed={collapsed}
@@ -96,11 +91,11 @@ const App: React.FC = () => {
                 Header={() => (
                   <HeaderBar
                     mode={mode}
-                    collapsed={collapsed}
                     onModeChange={(m) => {
                       localStorage.setItem("theme", m);
                       setMode(m);
                     }}
+                    collapsed={collapsed}
                     onToggleSider={() => setCollapsed((c) => !c)}
                   />
                 )}
@@ -116,13 +111,34 @@ const App: React.FC = () => {
               path="/"
               element={
                 <Authenticated fallback={<Navigate to={"/login" + window.location.search} />}>
-                  {RootElement}
+                  {isSuper ? <Navigate to="/admin-users" replace /> : <Dashboard />}
                 </Authenticated>
               }
             />
-            <Route path="/numbers" element={<Authenticated><Numbers /></Authenticated>} />
-            <Route path="/sip-domains" element={<Authenticated><SipDomains /></Authenticated>} />
-            <Route path="/admin-users" element={<Authenticated><AdminUsers /></Authenticated>} />
+            <Route
+              path="/numbers"
+              element={
+                <Authenticated>
+                  <Numbers />
+                </Authenticated>
+              }
+            />
+            <Route
+              path="/sip-domains"
+              element={
+                <Authenticated>
+                  <SipDomains />
+                </Authenticated>
+              }
+            />
+            <Route
+              path="/admin-users"
+              element={
+                <Authenticated>
+                  <AdminUsers />
+                </Authenticated>
+              }
+            />
             <Route path="/login" element={<Login />} />
             <Route path="*" element={<ErrorComponent />} />
           </Routes>
