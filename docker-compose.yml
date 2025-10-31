@@ -1,17 +1,17 @@
+version: "3.8"
+
 services:
   api:
     image: python:3.12-slim
     container_name: sipcha-api
     restart: always
-    labels:
-      "test": "test"
     environment:
-      - JWT_SECRET=change-me
-      # Add later when you wire Twilio:
+      - JWT_SECRET=${JWT_SECRET}
+      - JWT_EXPIRE_MINUTES=${JWT_EXPIRE_MINUTES:-1440}
+      - ADMIN_PROVISIONING_TOKEN=${ADMIN_PROVISIONING_TOKEN}
       - TWILIO_ACCOUNT_SID=${TWILIO_ACCOUNT_SID}
       - TWILIO_AUTH_TOKEN=${TWILIO_AUTH_TOKEN}
-      # - VERIFY_SERVICE_SID=
-      # - SYNC_SERVICE_SID=
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
     volumes:
       - ./api/app:/app
       - ./api/requirements.txt:/tmp/requirements.txt:ro
@@ -19,11 +19,13 @@ services:
       /bin/sh -lc "pip install --no-cache-dir -r /tmp/requirements.txt &&
       python -m uvicorn app.main:app --host 0.0.0.0 --port 8000"
     healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://localhost:8000/healthz"]
+      test: ["CMD", "wget", "-qO-", "http://localhost:8000/healthz"]
       interval: 10s
       timeout: 3s
       retries: 5
     networks: [dokploy-network]
+    ports:
+      - ":8000"  # keep for local dev; remove if using ingress
 
   web-build:
     image: node:20-alpine
@@ -32,7 +34,6 @@ services:
     volumes:
       - ./web:/src
       - web_dist:/out
-    # use npm install (not ci) unless you commit package-lock.json
     command: >
       sh -lc "npm install &&
       npm run build &&
@@ -49,9 +50,8 @@ services:
         condition: service_completed_successfully
     volumes:
       - web_dist:/usr/share/nginx/html:ro
-    # you can omit ports if using Dokploy ingress; keeping for quick local probe
     ports:
-      - ":80"
+      - ":80" # browse http://localhost:8080
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost/"]
       interval: 15s

@@ -1,66 +1,55 @@
-import React from "react";
-import axios from "axios";
+import React, { useMemo, useState } from "react";
 import { Card, Form, Input, Button, Typography, Alert } from "antd";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { login, getSubaccountFromURL } from "../auth";
 
-const api = axios.create({ baseURL: "/api" });
+const { Title, Text } = Typography;
 
-export default function Login() {
-  const [search] = useSearchParams();
-  const company = search.get("company") || "";
-  const nav = useNavigate();
-  const [error, setError] = React.useState<string | null>(null);
-  const [loading, setLoading] = React.useState(false);
+const Login: React.FC = () => {
+  const subaccount = useMemo(() => getSubaccountFromURL(), []);
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
 
   const onFinish = async (values: any) => {
-    setError(null); setLoading(true);
+    setErr(null);
+    if (!subaccount) {
+      setErr("Missing ?subaccount=friendlyName in URL.");
+      return;
+    }
+    setLoading(true);
     try {
-      const { data } = await api.post(`/auth/login?company=${encodeURIComponent(company)}`, {
-        username: values.username,
-        password: values.password,
-      });
-      localStorage.setItem("token", data.token);
-      localStorage.setItem("company", company);
-      nav("/", { replace: true });
+      await login(subaccount, values.username, values.password);
+      window.location.href = "/" + window.location.search;
     } catch (e: any) {
-      setError(e?.response?.data?.detail || "Login failed");
+      const msg = e?.response?.data?.detail || "Login failed";
+      setErr(msg);
     } finally {
       setLoading(false);
     }
   };
 
-  if (!company) {
-    return (
-      <Card style={{ maxWidth: 420, margin: "64px auto" }}>
-        <Typography.Title level={4}>Company required</Typography.Title>
-        <Typography.Paragraph>
-          Append <code>?company=&lt;slug&gt;</code> to the URL.<br/>
-          Example: <code>https://your-domain/login?company=acme</code>
-        </Typography.Paragraph>
-      </Card>
-    );
-  }
-
   return (
-    <Card style={{ maxWidth: 420, margin: "64px auto" }}>
-      <Typography.Title level={3} style={{ textAlign: "center" }}>
-        Sign in · {company}
-      </Typography.Title>
-      {error && <Alert type="error" message={error} style={{ marginBottom: 12 }} />}
-      <Form layout="vertical" onFinish={onFinish}>
-        <Form.Item name="username" label="Username" rules={[{ required: true }]}>
-          <Input autoFocus />
-        </Form.Item>
-        <Form.Item name="password" label="Password" rules={[{ required: true }]}>
-          <Input.Password />
-        </Form.Item>
-        <Button type="primary" htmlType="submit" block loading={loading}>
-          Sign in
-        </Button>
-      </Form>
-      <Typography.Paragraph style={{ marginTop: 12, textAlign: "center" }}>
-        Forgot password? Ask your link owner to reset via SMS.
-      </Typography.Paragraph>
-    </Card>
+    <div style={{display:"flex", minHeight:"70vh", alignItems:"center", justifyContent:"center"}}>
+      <Card style={{width: 380}}>
+        <Title level={3} style={{marginBottom: 8}}>Admin Login</Title>
+        <Text type="secondary">
+          {subaccount ? `Subaccount: ${subaccount}` : "Provide ?subaccount=YourSubaccountName in the URL"}
+        </Text>
+        <div style={{height: 12}} />
+        {err && <Alert type="error" message={err} showIcon style={{marginBottom:12}} />}
+        <Form layout="vertical" onFinish={onFinish}>
+          <Form.Item name="username" label="Username" rules={[{required:true}]}>
+            <Input autoFocus />
+          </Form.Item>
+          <Form.Item name="password" label="Password" rules={[{required:true}]}>
+            <Input.Password />
+          </Form.Item>
+          <Button type="primary" htmlType="submit" block loading={loading} disabled={!subaccount}>
+            Sign in
+          </Button>
+        </Form>
+      </Card>
+    </div>
   );
-}
+};
+
+export default Login;
