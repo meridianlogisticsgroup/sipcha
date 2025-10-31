@@ -17,7 +17,6 @@ services:
       /bin/sh -lc "pip install --no-cache-dir -r /tmp/requirements.txt &&
       python -m uvicorn app.main:app --host 0.0.0.0 --port 8000"
     healthcheck:
-      # Use Python stdlib for healthcheck (no wget/curl needed)
       test: ["CMD", "python", "-c",
              "import urllib.request,sys; sys.exit(0) if urllib.request.urlopen('http://localhost:8000/healthz',timeout=3).getcode()==200 else sys.exit(1)"]
       interval: 10s
@@ -25,9 +24,8 @@ services:
       retries: 6
       start_period: 10s
     networks: [dokploy-network]
-    # Optional: leave published if you want to hit it directly; not required when proxying via web
-    ports:
-      - ":8000"
+    expose:
+      - "8000"   # internal-only; Dokploy/Traefik will proxy to this
 
   web-build:
     image: node:20-bookworm-slim
@@ -43,11 +41,13 @@ services:
       - npm_cache:/root/.npm
     command: >
       sh -lc "
+        set -e;
         node -v && npm -v;
         npm install --no-audit --no-fund;
         npx vite build || ./node_modules/.bin/vite build;
         rm -rf /out/*;
-        cp -r dist/* /out/
+        cp -a dist/. /out/;
+        ls -la /out
       "
     networks: [dokploy-network]
 
@@ -63,14 +63,14 @@ services:
     volumes:
       - web_dist:/usr/share/nginx/html:ro
       - ./web/nginx.conf:/etc/nginx/nginx.conf:ro
-    ports:
-      - ":80"
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost/"]
+      test: ["CMD", "sh", "-lc", "[ -f /usr/share/nginx/html/index.html ] && wget -qO- http://localhost/ >/dev/null" ]
       interval: 15s
-      timeout: 3s
+      timeout: 5s
       retries: 5
     networks: [dokploy-network]
+    expose:
+      - "80"     # internal-only; Dokploy/Traefik will proxy to this
 
 networks:
   dokploy-network:
