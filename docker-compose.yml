@@ -17,13 +17,17 @@ services:
       /bin/sh -lc "pip install --no-cache-dir -r /tmp/requirements.txt &&
       python -m uvicorn app.main:app --host 0.0.0.0 --port 8000"
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:8000/healthz"]
+      # Use Python stdlib for healthcheck (no wget/curl needed)
+      test: ["CMD", "python", "-c",
+             "import urllib.request,sys; sys.exit(0) if urllib.request.urlopen('http://localhost:8000/healthz',timeout=3).getcode()==200 else sys.exit(1)"]
       interval: 10s
-      timeout: 3s
-      retries: 5
+      timeout: 4s
+      retries: 6
+      start_period: 10s
     networks: [dokploy-network]
+    # Optional: leave published if you want to hit it directly; not required when proxying via web
     ports:
-      - ":8000"  # optional if you want to hit the API directly; not required for proxying
+      - ":8000"
 
   web-build:
     image: node:20-bookworm-slim
@@ -58,7 +62,7 @@ services:
         condition: service_healthy
     volumes:
       - web_dist:/usr/share/nginx/html:ro
-      - ./web/nginx.conf:/etc/nginx/nginx.conf:ro  # <-- NEW: custom reverse proxy
+      - ./web/nginx.conf:/etc/nginx/nginx.conf:ro
     ports:
       - ":80"
     healthcheck:
