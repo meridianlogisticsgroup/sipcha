@@ -1,28 +1,30 @@
 import { Refine, useTable } from "@refinedev/core";
-import { BrowserRouter, Routes, Route, useNavigate } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate, useNavigate } from "react-router-dom"; // ⬅ add Navigate
 import React from "react";
 import axios from "axios";
 
 const api = axios.create({ baseURL: "/api" });
-const authHeader = () => {
+
+function authHeader() {
   const t = localStorage.getItem("token");
   return t ? { Authorization: `Bearer ${t}` } : {};
-};
+}
 
 const dataProvider = {
   getList: async ({ resource }: any) => {
-    const res = await api.get(`/${resource}`, { headers: authHeader() });
-    return { data: res.data, total: res.data.length ?? 0 };
+    try {
+      const res = await api.get(`/${resource}`, { headers: authHeader() });
+      // handle both array and `{data:..., total:...}`
+      const data = Array.isArray(res.data) ? res.data : res.data?.data ?? [];
+      const total = Array.isArray(res.data) ? data.length : res.data?.total ?? data.length;
+      return { data, total };
+    } catch (err: any) {
+      // on 401, return empty list so Refine doesn't explode
+      if (err?.response?.status === 401) return { data: [], total: 0 };
+      throw err;
+    }
   },
 } as any;
-
-async function requestCode(to: string) {
-  await api.post("/auth/request", { to });
-}
-async function verifyCode(to: string, code: string) {
-  const res = await api.post("/auth/verify", { to, code });
-  return res.data;
-}
 
 function Agents() {
   const { tableQueryResult } = useTable({ resource: "agents" });
@@ -44,17 +46,17 @@ function Login() {
   const [code, setCode] = React.useState("");
   const nav = useNavigate();
 
-  const onStart = async (e: React.FormEvent) => {
+  async function onStart(e: React.FormEvent) {
     e.preventDefault();
-    await requestCode(to);
+    await api.post("/auth/request", { to });
     setSent(true);
-  };
-  const onVerify = async (e: React.FormEvent) => {
+  }
+  async function onVerify(e: React.FormEvent) {
     e.preventDefault();
-    const { token } = await verifyCode(to, code);
+    const { token } = (await api.post("/auth/verify", { to, code })).data;
     localStorage.setItem("token", token);
-    nav("/");
-  };
+    nav("/", { replace: true });
+  }
 
   return (
     <div style={{ padding: 24, maxWidth: 360 }}>
@@ -74,10 +76,10 @@ function Login() {
   );
 }
 
+// ⬇️ Hard guard: don't render children if no token
 function Guard({ children }: { children: React.ReactNode }) {
   const token = localStorage.getItem("token");
-  const nav = useNavigate();
-  React.useEffect(() => { if (!token) nav("/login"); }, [token]);
+  if (!token) return <Navigate to="/login" replace />;
   return <>{children}</>;
 }
 
@@ -88,6 +90,8 @@ export default function App() {
         <Routes>
           <Route path="/login" element={<Login />} />
           <Route path="/" element={<Guard><Agents /></Guard>} />
+          {/* SPA fallback (optional, nice for deep links):
+          <Route path="*" element={<Navigate to="/" replace />} /> */}
         </Routes>
       </Refine>
     </BrowserRouter>
