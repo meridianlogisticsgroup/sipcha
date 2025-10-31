@@ -4,9 +4,9 @@ services:
     container_name: sipcha-api
     restart: always
     environment:
-      - JWT_SECRET=${JWT_SECRET}
+      - JWT_SECRET=${JWT_SECRET:-change-me}
       - JWT_EXPIRE_MINUTES=${JWT_EXPIRE_MINUTES:-1440}
-      - ADMIN_PROVISIONING_TOKEN=${ADMIN_PROVISIONING_TOKEN}
+      - ADMIN_PROVISIONING_TOKEN=${ADMIN_PROVISIONING_TOKEN:-change-me}
       - TWILIO_ACCOUNT_SID=${TWILIO_ACCOUNT_SID}
       - TWILIO_AUTH_TOKEN=${TWILIO_AUTH_TOKEN}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
@@ -23,10 +23,10 @@ services:
       retries: 5
     networks: [dokploy-network]
     ports:
-      - ":8000"
+      - "8000:8000"
 
   web-build:
-    image: node:20-bookworm-slim   # <-- switch off Alpine to avoid esbuild/musl issues
+    image: node:20-bookworm-slim
     container_name: sipcha-web-build
     working_dir: /src
     environment:
@@ -39,11 +39,9 @@ services:
       - npm_cache:/root/.npm
     command: >
       sh -lc "
-        corepack enable || true;
-        npm --version;
-        node --version;
-        npm ci || npm install;
-        npm run build;
+        node -v && npm -v;
+        npm install --no-audit --no-fund;
+        npx vite build || ./node_modules/.bin/vite build;
         rm -rf /out/*;
         cp -r dist/* /out/
       "
@@ -59,7 +57,7 @@ services:
     volumes:
       - web_dist:/usr/share/nginx/html:ro
     ports:
-      - ":80"
+      - "8080:80"
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost/"]
       interval: 15s
