@@ -1,23 +1,14 @@
 import React from "react";
 import { BrowserRouter, Routes, Route, Link, Outlet, Navigate } from "react-router-dom";
 import { Refine, DataProvider } from "@refinedev/core";
-import {
-  ThemedLayoutV2,
-  ThemedSiderV2,
-  ThemedHeaderV2,
-  RefineThemes,
-} from "@refinedev/antd";
+import { ThemedLayoutV2, ThemedSiderV2, ThemedHeaderV2 } from "@refinedev/antd";
 import { ConfigProvider, theme } from "antd";
-
 import Dashboard from "./pages/Dashboard";
 import Agents from "./pages/Agents";
 import Numbers from "./pages/Numbers";
-
 import "antd/dist/reset.css";
 
-/** --- In-memory store + dataProvider (no backend) --- */
 type Row = Record<string, any>;
-
 const store: Record<string, Row[]> = {
   agents: [
     { id: "agent_1", name: "Alice", role: "Admin" },
@@ -60,7 +51,6 @@ const memoryProvider: DataProvider = {
     store[resource] = list;
     return { data: removed };
   },
-  // not used for now
   getApiUrl: () => "",
   custom: async () => ({ data: [] }),
   createMany: async () => ({ data: [] }),
@@ -68,11 +58,10 @@ const memoryProvider: DataProvider = {
   updateMany: async () => ({ data: [] }),
 };
 
-/** --- App Shell --- */
 function Shell() {
   return (
     <ThemedLayoutV2
-      Sider={() => <ThemedSiderV2 Title={({ collapsed }) => <Link to="/">Sipcha</Link>} />}
+      Sider={() => <ThemedSiderV2 Title={() => <Link to="/">Sipcha</Link>} />}
       Header={() => <ThemedHeaderV2 sticky />}
     >
       <Outlet />
@@ -82,7 +71,7 @@ function Shell() {
 
 export default function App() {
   return (
-    <ConfigProvider theme={{ algorithm: theme.darkAlgorithm, token: { borderRadius: 10 }}} >
+    <ConfigProvider theme={{ algorithm: theme.darkAlgorithm, token: { borderRadius: 10 } }}>
       <BrowserRouter>
         <Refine
           dataProvider={memoryProvider}
