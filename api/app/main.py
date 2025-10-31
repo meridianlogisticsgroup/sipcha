@@ -71,13 +71,15 @@ class AdminUserOut(BaseModel):
 # ==========================
 # Helpers: Subaccount & Sync
 # ==========================
-SYNC_SERVICE_UNIQUE_NAME = "mlg-auth"
+# Keep both names as candidates so API can read existing records created by the Function.
+SYNC_SERVICE_CANDIDATE_UNIQUE = ["sipcha-admins", "mlg-auth", "default"]
+SYNC_SERVICE_CANDIDATE_FRIENDLY = ["sipcha-admins", "MLG Auth Service", "Default Service"]
 SYNC_MAP_UNIQUE_NAME = "admins"
 AC_SID_RX = re.compile(r"^AC[a-fA-F0-9]{32}$")
 
 def find_subaccount_by_name(client: Client, friendly_name: str) -> Optional[Dict[str, Any]]:
     for acc in client.api.accounts.stream(status="active"):
-        if getattr(acc, "friendly_name", None) == friendly_name:
+        if (getattr(acc, "friendly_name", None) or "").strip() == friendly_name.strip():
             return {"sid": acc.sid, "friendly_name": acc.friendly_name}
     return None
 
@@ -90,46 +92,55 @@ def get_subaccount_by_sid(client: Client, sid: str) -> Optional[Dict[str, Any]]:
         pass
     return None
 
-def get_or_create_sync_service(client: Client) -> str:
+def get_or_attach_existing_sync_service(client: Client) -> Optional[str]:
+    # Prefer an existing service named "sipcha-admins" (either unique_name or friendly_name).
     for svc in client.sync.v1.services.stream():
-        if getattr(svc, "unique_name", None) == SYNC_SERVICE_UNIQUE_NAME:
+        uname = (getattr(svc, "unique_name", None) or "").strip()
+        fname = (getattr(svc, "friendly_name", None) or "").strip()
+        if uname in SYNC_SERVICE_CANDIDATE_UNIQUE or fname in SYNC_SERVICE_CANDIDATE_FRIENDLY:
             return svc.sid
-    svc = client.sync.v1.services.create(unique_name=SYNC_SERVICE_UNIQUE_NAME, friendly_name="MLG Auth Service")
+    return None
+
+def get_or_create_sync_service(client: Client) -> str:
+    sid = get_or_attach_existing_sync_service(client)
+    if sid:
+        return sid
+    # Create consistently with the Function: unique_name=friendly_name="sipcha-admins"
+    svc = client.sync.v1.services.create(unique_name="sipcha-admins", friendly_name="sipcha-admins")
     return svc.sid
 
 def ensure_sync_map(client: Client, service_sid: str) -> None:
     for m in client.sync.v1.services(service_sid).sync_maps.stream():
         if getattr(m, "unique_name", None) == SYNC_MAP_UNIQUE_NAME:
             return
-    client.sync.v1.services(service_sid).sync_maps.create(unique_name=SYNC_MAP_UNIQUE_NAME)
-
-def sync_doc_key_for_admin(username: str) -> str:
-    return f"admin:{username}"
+    client.sync.v1.services(service_sid).sync_maps.create(unique_name=SYNC_MAP_UNIQUE_NAME, ttl=0)
 
 def read_admin_user(client: Client, service_sid: str, username: str) -> Optional[Dict[str, Any]]:
+    # Try the map item in the selected service
     try:
         mitem = client.sync.v1.services(service_sid).sync_maps(SYNC_MAP_UNIQUE_NAME).sync_map_items(username).fetch()
         if mitem and mitem.data:
             return mitem.data
     except Exception:
         pass
-    key = sync_doc_key_for_admin(username)
+    # As a fallback, just in case data was written into a different service, scan others quickly.
     try:
-        doc = client.sync.v1.services(service_sid).documents(key).fetch()
-        return doc.data
+        for svc in client.sync.v1.services.stream():
+            try:
+                item = client.sync.v1.services(svc.sid).sync_maps(SYNC_MAP_UNIQUE_NAME).sync_map_items(username).fetch()
+                if item and item.data:
+                    return item.data
+            except Exception:
+                continue
     except Exception:
-        return None
+        pass
+    return None
 
 def write_admin_user(client: Client, service_sid: str, username: str, payload: Dict[str, Any]) -> None:
     try:
         client.sync.v1.services(service_sid).sync_maps(SYNC_MAP_UNIQUE_NAME).sync_map_items(username).update(data=payload)
     except Exception:
         client.sync.v1.services(service_sid).sync_maps(SYNC_MAP_UNIQUE_NAME).sync_map_items.create(key=username, data=payload)
-    key = sync_doc_key_for_admin(username)
-    try:
-        client.sync.v1.services(service_sid).documents(key).update(data=payload)
-    except Exception:
-        client.sync.v1.services(service_sid).documents.create(unique_name=key, data=payload)
 
 # ==========================
 # App structure:
@@ -139,7 +150,7 @@ def write_admin_user(client: Client, service_sid: str, username: str, payload: D
 app = FastAPI(title="SIPCHA (SPA + API host)")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],   # ok for now; tighten later
+    allow_origins=["*"],   # tighten later
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -182,24 +193,30 @@ def login(subaccount: str = Query(..., description="Subaccount FriendlyName or A
         raise HTTPException(404, f"Subaccount '{subaccount}' not found")
 
     sub_client = twilio_client_for(sa["sid"])
-    service_sid = get_or_create_sync_service(sub_client)
+
+    # <<< IMPORTANT: align with Function >>>
+    service_sid = get_or_create_sync_service(sub_client)  # prefers/uses "sipcha-admins"
     ensure_sync_map(sub_client, service_sid)
 
     rec = read_admin_user(sub_client, service_sid, body.username)
     if not rec:
         raise HTTPException(401, "Invalid username or password")
 
-    pwd_hash = rec.get("password_hash")
+    # Accept both shapes: password_hash (snake_case) or passwordHash (camelCase)
+    pwd_hash = rec.get("password_hash") or rec.get("passwordHash")
     if not pwd_hash or not bcrypt.verify(body.password, pwd_hash):
         raise HTTPException(401, "Invalid username or password")
 
-    roles = rec.get("roles", ["admin"])
+    roles = rec.get("roles") or []
+    if not isinstance(roles, list):
+        roles = ["admin"]
+
     token = create_access_token(
         {
             "subaccount_sid": sa["sid"],
             "subaccount_name": sa["friendly_name"],
             "username": body.username,
-            "roles": roles,
+            "roles": roles or ["admin"],
         }
     )
     return TokenOut(access_token=token)
@@ -232,16 +249,6 @@ def list_admin_users(ctx: dict = Depends(get_current)):
             return out
     except Exception:
         pass
-    for doc in client.sync.v1.services(service_sid).documents.stream():
-        if (doc.unique_name or "").startswith("admin:"):
-            data = doc.data or {}
-            out.append(
-                AdminUserOut(
-                    username=doc.unique_name.split("admin:", 1)[1],
-                    roles=data.get("roles", ["admin"]),
-                    updated_at=str(getattr(doc, "date_updated", "") or ""),
-                )
-            )
     return out
 
 @api_app.post("/admin/users", response_model=AdminUserOut)
@@ -250,6 +257,7 @@ def create_admin_user(item: AdminUserIn, ctx: dict = Depends(get_current)):
     service_sid = get_or_create_sync_service(client)
     ensure_sync_map(client, service_sid)
     payload = {
+        # write snake_case; Function writes camelCase — login accepts both
         "password_hash": bcrypt.hash(item.password),
         "roles": item.roles,
         "updated_at": datetime.utcnow().isoformat() + "Z",
@@ -287,22 +295,18 @@ app.mount("/api", api_app)
 # ==========================
 # SPA routes
 # ==========================
+STATIC_DIR = pathlib.Path("/app/static")
 INDEX_FILE = STATIC_DIR / "index.html"
 
 def serve_index() -> Response:
     if INDEX_FILE.exists():
         return FileResponse(str(INDEX_FILE))
-    # Helpful message if dist isn’t built yet
     return PlainTextResponse("SPA not built yet. Run the web-build service.", status_code=503)
 
-# Serve the SPA at root
 @app.get("/", include_in_schema=False)
 def spa_root():
     return serve_index()
 
-# Serve SPA for any non-API path (React Router paths: /login, /numbers, etc.)
 @app.get("/{full_path:path}", include_in_schema=False)
 def spa_catch_all(full_path: str):
-    # Anything not under /api should return index.html
-    # (FastAPI routing gives precedence to existing /api/* routes above)
     return serve_index()
