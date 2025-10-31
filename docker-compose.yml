@@ -3,6 +3,8 @@ services:
     image: python:3.12-slim
     container_name: sipcha-api
     restart: always
+    labels:
+      "test": "test"
     environment:
       - JWT_SECRET=change-me
       # Add later when you wire Twilio:
