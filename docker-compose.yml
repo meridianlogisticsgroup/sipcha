@@ -49,7 +49,7 @@ services:
       - web_dist:/usr/share/nginx/html:ro
     # you can omit ports if using Dokploy ingress; keeping for quick local probe
     ports:
-      - "8080:80"
+      - ":80"
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost/"]
       interval: 15s
