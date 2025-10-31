@@ -1,7 +1,5 @@
 import axios from "axios";
 
-// Prefer same-origin reverse proxy (/api)
-// Overridable with VITE_API_URL or window.__API_URL__
 const API_URL: string =
   (import.meta as any).env?.VITE_API_URL ||
   (window as any).__API_URL__ ||
@@ -24,17 +22,25 @@ export function getSubaccountFromURL(): string | null {
 }
 
 export async function login(subaccount: string, username: string, password: string) {
-  // works for both FriendlyName and SID
   const res = await api.post(`/auth/login?subaccount=${encodeURIComponent(subaccount)}`, { username, password });
   const { access_token } = res.data;
   localStorage.setItem("token", access_token);
   localStorage.setItem("subaccount", subaccount);
+
+  // Prime roles for Sidebar / resources
+  try {
+    const me = await api.get("/me");
+    localStorage.setItem("roles", JSON.stringify(me.data?.roles || []));
+  } catch (_) {
+    localStorage.removeItem("roles");
+  }
   return res.data;
 }
 
 export function logout() {
   localStorage.removeItem("token");
   localStorage.removeItem("subaccount");
+  localStorage.removeItem("roles");
 }
 
 export function isAuthed() {

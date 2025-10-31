@@ -57,14 +57,18 @@ class MeOut(BaseModel):
     subaccount_sid: str
     subaccount_name: str
     username: str
+    roles: List[str] = Field(default_factory=list)
+    phone: Optional[str] = None
 
 class AdminUserIn(BaseModel):
     username: str
     password: str
+    phone: Optional[str] = None
     roles: List[str] = Field(default_factory=lambda: ["admin"])
 
 class AdminUserOut(BaseModel):
     username: str
+    phone: Optional[str] = None
     roles: List[str]
     updated_at: Optional[str] = None
 
@@ -91,11 +95,6 @@ def get_subaccount_by_sid(client: Client, sid: str) -> Optional[Dict[str, Any]]:
     return None
 
 def _choose_consistent_sync_service_sid(services: List[Any]) -> Optional[str]:
-    """
-    Given a list of service records (already filtered to name matches),
-    return a stable choice: prefer unique_name matches, then friendly matches;
-    within each group, pick lowest SID for stability.
-    """
     def key_sid(svc): return getattr(svc, "sid", "")
     uniques = [s for s in services if (getattr(s, "unique_name", "") or "").strip() == SYNC_SERVICE_NAME]
     if uniques:
@@ -134,7 +133,7 @@ def read_admin_user(client: Client, service_sid: str, username: str) -> Optional
             return mitem.data
     except Exception:
         pass
-    # Fallback scan (in case of legacy stray services); normalized selection still applies.
+    # fallback scan among services named sipcha-admins
     try:
         matches = []
         for svc in client.sync.v1.services.stream():
@@ -161,9 +160,7 @@ def write_admin_user(client: Client, service_sid: str, username: str, payload: D
         client.sync.v1.services(service_sid).sync_maps(SYNC_MAP_UNIQUE_NAME).sync_map_items.create(key=username, data=payload)
 
 # ==========================
-# App structure:
-# - app: main FastAPI serving SPA + mounting API under /api
-# - api_app: all JSON endpoints
+# App structure
 # ==========================
 app = FastAPI(title="SIPCHA (SPA + API host)")
 app.add_middleware(
@@ -174,12 +171,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ---- Mount built SPA assets (/app/static from web-build) ----
 STATIC_DIR = pathlib.Path("/app/static")
 ASSETS_DIR = STATIC_DIR / "assets"
 app.mount("/assets", StaticFiles(directory=str(ASSETS_DIR), check_dir=False), name="assets")
 
-# ---- Sub-app for the JSON API under /api ----
 api_app = FastAPI(title="SIPCHA API")
 
 def get_current(identity: HTTPAuthorizationCredentials = Depends(security)) -> dict:
@@ -200,7 +195,6 @@ def login(subaccount: str = Query(..., description="Subaccount FriendlyName or A
 
     root_client = twilio_client_for()
 
-    # Resolve subaccount
     if AC_SID_RX.match(subaccount):
         sa = get_subaccount_by_sid(root_client, subaccount)
     else:
@@ -211,7 +205,6 @@ def login(subaccount: str = Query(..., description="Subaccount FriendlyName or A
 
     sub_client = twilio_client_for(sa["sid"])
 
-    # Deterministic service + map
     service_sid = get_or_create_sync_service(sub_client)
     ensure_sync_map(sub_client, service_sid)
 
@@ -219,7 +212,6 @@ def login(subaccount: str = Query(..., description="Subaccount FriendlyName or A
     if not rec:
         raise HTTPException(401, "Invalid username or password")
 
-    # Accept camelCase or snake_case
     pwd_hash = rec.get("password_hash") or rec.get("passwordHash")
     if not pwd_hash or not bcrypt.verify(body.password, pwd_hash):
         raise HTTPException(401, "Invalid username or password")
@@ -234,6 +226,7 @@ def login(subaccount: str = Query(..., description="Subaccount FriendlyName or A
             "subaccount_name": sa["friendly_name"],
             "username": body.username,
             "roles": roles or ["admin"],
+            "phone": rec.get("phone"),
         }
     )
     return TokenOut(access_token=token)
@@ -244,6 +237,8 @@ def me(ctx: dict = Depends(get_current)):
         subaccount_sid=ctx["subaccount_sid"],
         subaccount_name=ctx["subaccount_name"],
         username=ctx["username"],
+        roles=ctx.get("roles", []),
+        phone=ctx.get("phone"),
     )
 
 @api_app.get("/admin/users", response_model=List[AdminUserOut])
@@ -258,6 +253,7 @@ def list_admin_users(ctx: dict = Depends(get_current)):
             out.append(
                 AdminUserOut(
                     username=item.key,
+                    phone=data.get("phone"),
                     roles=data.get("roles", ["admin"]),
                     updated_at=str(getattr(item, "date_updated", "") or ""),
                 )
@@ -276,11 +272,13 @@ def create_admin_user(item: AdminUserIn, ctx: dict = Depends(get_current)):
     payload = {
         "password_hash": bcrypt.hash(item.password),
         "roles": item.roles,
+        "phone": item.phone,
         "updated_at": datetime.utcnow().isoformat() + "Z",
     }
     write_admin_user(client, service_sid, item.username, payload)
-    return AdminUserOut(username=item.username, roles=item.roles, updated_at=payload["updated_at"])
+    return AdminUserOut(username=item.username, roles=item.roles, phone=item.phone, updated_at=payload["updated_at"])
 
+# Twilio inventory helpers
 @api_app.get("/twilio/numbers")
 def list_numbers(ctx: dict = Depends(get_current)):
     client = twilio_client_for(ctx["subaccount_sid"])
@@ -311,7 +309,6 @@ app.mount("/api", api_app)
 # ==========================
 # SPA routes
 # ==========================
-STATIC_DIR = pathlib.Path("/app/static")
 INDEX_FILE = STATIC_DIR / "index.html"
 
 def serve_index() -> Response:

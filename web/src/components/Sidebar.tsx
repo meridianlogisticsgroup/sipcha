@@ -1,32 +1,31 @@
-import React, { useEffect, useState } from "react";
-import { Layout, Menu } from "antd";
+import React, { useMemo } from "react";
+import { Layout, Menu, Typography } from "antd";
 import { Link, useLocation } from "react-router-dom";
-import { PhoneOutlined, CloudServerOutlined, TeamOutlined, DashboardOutlined } from "@ant-design/icons";
-import { api } from "../auth";
+import {
+  PhoneOutlined,
+  CloudServerOutlined,
+  TeamOutlined,
+  DashboardOutlined,
+  CrownOutlined,
+} from "@ant-design/icons";
 
 const { Sider } = Layout;
 
 const Sidebar: React.FC = () => {
   const { pathname } = useLocation();
   const selected = [pathname === "/" ? "/dashboard" : pathname];
-  const [roles, setRoles] = useState<string[] | null>(null);
-  const isSuper = roles?.includes("superadmin");
-
-  useEffect(() => {
-    (async () => {
-      try {
-        const r = await api.get("/me");
-        setRoles(r.data?.roles || []);
-      } catch {
-        setRoles([]);
-      }
-    })();
+  const roles: string[] = useMemo(() => {
+    try { return JSON.parse(localStorage.getItem("roles") || "[]"); } catch { return []; }
   }, []);
+  const isSuper = roles.includes("superadmin");
 
   return (
-    <Sider width={232} breakpoint="lg" collapsedWidth={64}>
-      <div style={{ color: "white", padding: 16, fontWeight: 700 }}>SIPCHA</div>
-      <Menu theme="dark" mode="inline" selectedKeys={selected}>
+    <Sider width={240} breakpoint="lg" collapsedWidth={64}>
+      <div style={{ color: "white", padding: 16, fontWeight: 800, letterSpacing: 0.5, display: "flex", gap: 8, alignItems: "center" }}>
+        <CrownOutlined style={{ fontSize: 18 }} />
+        <Typography.Text style={{ color: "white", fontWeight: 800 }}>SIPCHA</Typography.Text>
+      </div>
+      <Menu theme="dark" mode="inline" selectedKeys={selected} style={{ borderRight: 0 }}>
         {!isSuper && (
           <>
             <Menu.Item key="/dashboard" icon={<DashboardOutlined />}>
@@ -40,9 +39,8 @@ const Sidebar: React.FC = () => {
             </Menu.Item>
           </>
         )}
-        {/* Superadmin and regular admins both see Admin Users, but only superadmin can use it (API-guarded). */}
         <Menu.Item key="/admin-users" icon={<TeamOutlined />}>
-          <Link to="/admin-users">Admin Users</Link>
+          <Link to="/admin-users">{isSuper ? "Admin Provisioning" : "Admins"}</Link>
         </Menu.Item>
       </Menu>
     </Sider>

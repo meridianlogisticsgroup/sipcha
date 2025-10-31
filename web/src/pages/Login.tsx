@@ -28,19 +28,19 @@ const Login: React.FC = () => {
   };
 
   return (
-    <div style={{display:"flex", minHeight:"70vh", alignItems:"center", justifyContent:"center"}}>
-      <Card style={{width: 380}}>
-        <Title level={3} style={{marginBottom: 8}}>Admin Login</Title>
+    <div style={{ display: "flex", minHeight: "70vh", alignItems: "center", justifyContent: "center" }}>
+      <Card style={{ width: 420, borderRadius: 12 }}>
+        <Title level={3} style={{ marginBottom: 8 }}>Admin Login</Title>
         <Text type="secondary">
           {subaccount ? `Subaccount: ${subaccount}` : "Provide ?subaccount=YourSubaccountName in the URL"}
         </Text>
-        <div style={{height: 12}} />
-        {err && <Alert type="error" message={err} showIcon style={{marginBottom:12}} />}
+        <div style={{ height: 12 }} />
+        {err && <Alert type="error" message={err} showIcon style={{ marginBottom: 12 }} />}
         <Form layout="vertical" onFinish={onFinish}>
-          <Form.Item name="username" label="Username" rules={[{required:true}]}>
+          <Form.Item name="username" label="Username" rules={[{ required: true }]}>
             <Input autoFocus />
           </Form.Item>
-          <Form.Item name="password" label="Password" rules={[{required:true}]}>
+          <Form.Item name="password" label="Password" rules={[{ required: true }]}>
             <Input.Password />
           </Form.Item>
           <Button type="primary" htmlType="submit" block loading={loading} disabled={!subaccount}>
