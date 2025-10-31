@@ -3,15 +3,12 @@ import { BrowserRouter, Routes, Route, useNavigate } from "react-router-dom";
 import React from "react";
 import axios from "axios";
 
-/** Simple API client that targets the path-routed backend */
 const api = axios.create({ baseURL: "/api" });
-
-function authHeader() {
+const authHeader = () => {
   const t = localStorage.getItem("token");
   return t ? { Authorization: `Bearer ${t}` } : {};
-}
+};
 
-/** Minimal Refine data provider with getList only (enough to render a table) */
 const dataProvider = {
   getList: async ({ resource }: any) => {
     const res = await api.get(`/${resource}`, { headers: authHeader() });
@@ -19,7 +16,6 @@ const dataProvider = {
   },
 } as any;
 
-/** Auth helpers */
 async function requestCode(to: string) {
   await api.post("/auth/request", { to });
 }
@@ -36,11 +32,7 @@ function Agents() {
       <h1>Agents</h1>
       <table>
         <thead><tr><th>ID</th><th>Name</th></tr></thead>
-        <tbody>
-          {items.map((a: any) => (
-            <tr key={a.id}><td>{a.id}</td><td>{a.name}</td></tr>
-          ))}
-        </tbody>
+        <tbody>{items.map((a: any) => <tr key={a.id}><td>{a.id}</td><td>{a.name}</td></tr>)}</tbody>
       </table>
     </div>
   );
@@ -52,17 +44,17 @@ function Login() {
   const [code, setCode] = React.useState("");
   const nav = useNavigate();
 
-  async function onStart(e: React.FormEvent) {
+  const onStart = async (e: React.FormEvent) => {
     e.preventDefault();
     await requestCode(to);
     setSent(true);
-  }
-  async function onVerify(e: React.FormEvent) {
+  };
+  const onVerify = async (e: React.FormEvent) => {
     e.preventDefault();
     const { token } = await verifyCode(to, code);
     localStorage.setItem("token", token);
     nav("/");
-  }
+  };
 
   return (
     <div style={{ padding: 24, maxWidth: 360 }}>
