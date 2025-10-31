@@ -5,4 +5,5 @@ pydantic==2.9.2
 pydantic-settings==2.5.2
 python-jose==3.3.0
 passlib[bcrypt]==1.7.4
+bcrypt==3.2.2
 twilio==9.3.4
