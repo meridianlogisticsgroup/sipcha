@@ -2,8 +2,8 @@ import React, { useEffect, useMemo, useState } from "react";
 import { Refine, Authenticated, ErrorComponent } from "@refinedev/core";
 import { notificationProvider, RefineThemes, ThemedLayoutV2 } from "@refinedev/antd";
 import "@refinedev/antd/dist/reset.css";
-import { ConfigProvider, App as AntdApp, theme, Skeleton } from "antd";
-import { Navigate, Outlet, Route, Routes, useLocation } from "react-router-dom";
+import { ConfigProvider, App as AntdApp, theme, Skeleton, Grid } from "antd";
+import { Navigate, Outlet, Route, Routes } from "react-router-dom";
 
 import Login from "./pages/Login";
 import Dashboard from "./pages/Dashboard";
@@ -16,18 +16,22 @@ import { api } from "./auth";
 
 type Me = { username: string; roles: string[]; subaccount_name: string };
 
-const Protected: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const authed = !!localStorage.getItem("token");
-  return authed ? <>{children}</> : <Navigate to={"/login" + window.location.search} />;
-};
-
 const App: React.FC = () => {
   const [me, setMe] = useState<Me | null>(null);
   const [loading, setLoading] = useState(true);
   const [mode, setMode] = useState<"light" | "dark">(
     (localStorage.getItem("theme") as "light" | "dark") || "light"
   );
-  const location = useLocation();
+
+  // --- Responsive Sider state ---
+  const screens = Grid.useBreakpoint();
+  const belowLg = !screens.lg; // lg ~= 992px
+  const [collapsed, setCollapsed] = useState<boolean>(belowLg);
+
+  useEffect(() => {
+    // auto-collapse when viewport drops below lg; expand back when >= lg
+    setCollapsed(belowLg);
+  }, [belowLg]);
 
   useEffect(() => {
     (async () => {
@@ -39,7 +43,7 @@ const App: React.FC = () => {
         const res = await api.get("/me");
         setMe(res.data);
         localStorage.setItem("roles", JSON.stringify(res.data.roles || []));
-      } catch (_) {
+      } catch {
         // ignore
       } finally {
         setLoading(false);
@@ -52,11 +56,8 @@ const App: React.FC = () => {
     return roles.includes("superadmin");
   }, [me]);
 
-  // Role-aware menu items (same layout; only visible resources differ)
   const resources = useMemo(() => {
-    if (isSuper) {
-      return [{ name: "admin-users", list: "/admin-users" }];
-    }
+    if (isSuper) return [{ name: "admin-users", list: "/admin-users" }];
     return [
       { name: "dashboard", list: "/" },
       { name: "numbers", list: "/numbers" },
@@ -65,26 +66,14 @@ const App: React.FC = () => {
     ];
   }, [isSuper]);
 
-  // Auto-redirect superadmin to Admin Provisioning when they hit "/"
-  const RootElement = isSuper ? (
-    <Navigate to="/admin-users" replace />
-  ) : (
-    <Dashboard />
-  );
+  const RootElement = isSuper ? <Navigate to="/admin-users" replace /> : <Dashboard />;
 
   return (
     <ConfigProvider
       theme={{
-        algorithm:
-          mode === "dark" ? theme.darkAlgorithm : theme.defaultAlgorithm,
-        token: {
-          colorPrimary: RefineThemes.Blue.token.colorPrimary,
-          borderRadius: 12,
-        },
-        components: {
-          Table: { headerBg: mode === "dark" ? "#141414" : "#fafafa" },
-          Card: { padding: 16, borderRadiusLG: 16 },
-        },
+        algorithm: mode === "dark" ? theme.darkAlgorithm : theme.defaultAlgorithm,
+        token: { colorPrimary: RefineThemes.Blue.token.colorPrimary, borderRadius: 12 },
+        components: { Card: { padding: 16, borderRadiusLG: 16 } },
       }}
     >
       <AntdApp>
@@ -94,19 +83,25 @@ const App: React.FC = () => {
           resources={resources}
           Layout={({ children }) =>
             loading ? (
-              <div style={{ padding: 24 }}>
-                <Skeleton active paragraph={{ rows: 6 }} />
-              </div>
+              <div style={{ padding: 24 }}><Skeleton active paragraph={{ rows: 6 }} /></div>
             ) : (
               <ThemedLayoutV2
-                Sider={() => <Sidebar />}
+                Sider={() => (
+                  <Sidebar
+                    collapsed={collapsed}
+                    onCollapse={setCollapsed}
+                    isSuper={isSuper}
+                  />
+                )}
                 Header={() => (
                   <HeaderBar
                     mode={mode}
+                    collapsed={collapsed}
                     onModeChange={(m) => {
                       localStorage.setItem("theme", m);
                       setMode(m);
                     }}
+                    onToggleSider={() => setCollapsed((c) => !c)}
                   />
                 )}
                 Title={() => null}
@@ -121,34 +116,13 @@ const App: React.FC = () => {
               path="/"
               element={
                 <Authenticated fallback={<Navigate to={"/login" + window.location.search} />}>
-                  <Protected>{RootElement}</Protected>
+                  {RootElement}
                 </Authenticated>
               }
             />
-            <Route
-              path="/numbers"
-              element={
-                <Protected>
-                  <Numbers />
-                </Protected>
-              }
-            />
-            <Route
-              path="/sip-domains"
-              element={
-                <Protected>
-                  <SipDomains />
-                </Protected>
-              }
-            />
-            <Route
-              path="/admin-users"
-              element={
-                <Protected>
-                  <AdminUsers />
-                </Protected>
-              }
-            />
+            <Route path="/numbers" element={<Authenticated><Numbers /></Authenticated>} />
+            <Route path="/sip-domains" element={<Authenticated><SipDomains /></Authenticated>} />
+            <Route path="/admin-users" element={<Authenticated><AdminUsers /></Authenticated>} />
             <Route path="/login" element={<Login />} />
             <Route path="*" element={<ErrorComponent />} />
           </Routes>

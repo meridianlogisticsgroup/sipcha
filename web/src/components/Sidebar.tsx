@@ -1,4 +1,4 @@
-import React, { useMemo } from "react";
+import React from "react";
 import { Layout, Menu, Typography } from "antd";
 import { Link, useLocation } from "react-router-dom";
 import {
@@ -10,20 +10,25 @@ import {
 
 const { Sider } = Layout;
 
-const Sidebar: React.FC = () => {
+const Sidebar: React.FC<{
+  collapsed: boolean;
+  onCollapse: (v: boolean) => void;
+  isSuper: boolean;
+}> = ({ collapsed, onCollapse, isSuper }) => {
   const { pathname } = useLocation();
   const selected = [pathname === "/" ? "/dashboard" : pathname];
-  const roles: string[] = useMemo(() => {
-    try { return JSON.parse(localStorage.getItem("roles") || "[]"); } catch { return []; }
-  }, []);
-  const isSuper = roles.includes("superadmin");
 
   return (
-    <Sider width={240} breakpoint="lg" collapsedWidth={64}>
+    <Sider
+      collapsible
+      collapsed={collapsed}
+      onCollapse={onCollapse}
+      width={240}
+      collapsedWidth={64}
+      breakpoint="lg"
+    >
       <div style={{ color: "white", padding: 16, fontWeight: 800, letterSpacing: 0.5 }}>
-        <Typography.Text style={{ color: "white", fontWeight: 800 }}>
-          SIPCHA
-        </Typography.Text>
+        <Typography.Text style={{ color: "white", fontWeight: 800 }}>SIPCHA</Typography.Text>
       </div>
       <Menu theme="dark" mode="inline" selectedKeys={selected} style={{ borderRight: 0 }}>
         {!isSuper && (
