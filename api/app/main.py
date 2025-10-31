@@ -1,4 +1,4 @@
-import os
+import os, re
 from datetime import datetime, timedelta, timezone
 from typing import Optional, List, Dict, Any
 
@@ -26,13 +26,8 @@ if not ACCOUNT_SID or not AUTH_TOKEN:
 security = HTTPBearer()
 
 def twilio_client_for(account_sid: Optional[str] = None) -> Client:
-    """
-    Return a Twilio client. If account_sid is provided and differs,
-    set the 'account_sid' on the client for subaccount scoped calls.
-    """
     base = Client(ACCOUNT_SID, AUTH_TOKEN)
     if account_sid and account_sid != ACCOUNT_SID:
-        # Subaccount scoping
         base = Client(ACCOUNT_SID, AUTH_TOKEN, account_sid=account_sid)
     return base
 
@@ -75,10 +70,9 @@ class AdminUserOut(BaseModel):
 # App
 # --------------------------
 app = FastAPI(title="SIPCHA API")
-
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # lock down later
+    allow_origins=["*"],  # safe due to same-origin proxying, lock down later if exposing directly
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -89,34 +83,31 @@ app.add_middleware(
 # --------------------------
 SYNC_SERVICE_UNIQUE_NAME = "mlg-auth"
 SYNC_MAP_UNIQUE_NAME = "admins"
+AC_SID_RX = re.compile(r"^AC[a-fA-F0-9]{32}$")
 
 def find_subaccount_by_name(client: Client, friendly_name: str) -> Optional[Dict[str, Any]]:
-    """
-    Find a subaccount by FriendlyName (exact match). Returns dict with sid/name or None.
-    """
     for acc in client.api.accounts.stream(status="active"):
         if getattr(acc, "friendly_name", None) == friendly_name:
             return {"sid": acc.sid, "friendly_name": acc.friendly_name}
     return None
 
+def get_subaccount_by_sid(client: Client, sid: str) -> Optional[Dict[str, Any]]:
+    try:
+        acc = client.api.accounts(sid).fetch()
+        if acc and acc.sid == sid:
+            return {"sid": acc.sid, "friendly_name": getattr(acc, "friendly_name", sid)}
+    except Exception:
+        pass
+    return None
+
 def get_or_create_sync_service(client: Client) -> str:
-    """
-    Prefer a Sync Service with unique_name = 'mlg-auth'. If missing, create it.
-    Returns service SID.
-    """
     for svc in client.sync.v1.services.stream():
         if getattr(svc, "unique_name", None) == SYNC_SERVICE_UNIQUE_NAME:
             return svc.sid
-    svc = client.sync.v1.services.create(
-        unique_name=SYNC_SERVICE_UNIQUE_NAME,
-        friendly_name="MLG Auth Service",
-    )
+    svc = client.sync.v1.services.create(unique_name=SYNC_SERVICE_UNIQUE_NAME, friendly_name="MLG Auth Service")
     return svc.sid
 
 def ensure_sync_map(client: Client, service_sid: str) -> None:
-    """
-    Ensure Sync Map 'admins' exists inside the given service.
-    """
     for m in client.sync.v1.services(service_sid).sync_maps.stream():
         if getattr(m, "unique_name", None) == SYNC_MAP_UNIQUE_NAME:
             return
@@ -126,23 +117,12 @@ def sync_doc_key_for_admin(username: str) -> str:
     return f"admin:{username}"
 
 def read_admin_user(client: Client, service_sid: str, username: str) -> Optional[Dict[str, Any]]:
-    """
-    Prefer Sync Map 'admins' (key=username). Fallback to legacy Document 'admin:{username}'.
-    """
-    # Primary: Map item
     try:
-        mitem = (
-            client.sync.v1.services(service_sid)
-            .sync_maps(SYNC_MAP_UNIQUE_NAME)
-            .sync_map_items(username)
-            .fetch()
-        )
+        mitem = client.sync.v1.services(service_sid).sync_maps(SYNC_MAP_UNIQUE_NAME).sync_map_items(username).fetch()
         if mitem and mitem.data:
             return mitem.data
     except Exception:
         pass
-
-    # Fallback: legacy document
     key = sync_doc_key_for_admin(username)
     try:
         doc = client.sync.v1.services(service_sid).documents(key).fetch()
@@ -151,16 +131,10 @@ def read_admin_user(client: Client, service_sid: str, username: str) -> Optional
         return None
 
 def write_admin_user(client: Client, service_sid: str, username: str, payload: Dict[str, Any]) -> None:
-    """
-    Canonical write to Sync Map 'admins'. Also mirrors to legacy Document for backward-compat.
-    """
-    # Upsert map item
     try:
         client.sync.v1.services(service_sid).sync_maps(SYNC_MAP_UNIQUE_NAME).sync_map_items(username).update(data=payload)
     except Exception:
         client.sync.v1.services(service_sid).sync_maps(SYNC_MAP_UNIQUE_NAME).sync_map_items.create(key=username, data=payload)
-
-    # Mirror legacy doc
     key = sync_doc_key_for_admin(username)
     try:
         client.sync.v1.services(service_sid).documents(key).update(data=payload)
@@ -173,8 +147,7 @@ def write_admin_user(client: Client, service_sid: str, username: str, payload: D
 def get_current(identity: HTTPAuthorizationCredentials = Depends(security)) -> dict:
     token = identity.credentials
     try:
-        payload = decode_token(token)
-        return payload
+        return decode_token(token)
     except JWTError:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
 
@@ -183,19 +156,25 @@ def healthz():
     return {"ok": True}
 
 @app.post("/auth/login", response_model=TokenOut)
-def login(subaccount: str = Query(..., description="Subaccount FriendlyName"), body: LoginIn = Body(...)):
+def login(subaccount: str = Query(..., description="Subaccount FriendlyName or Account SID"), body: LoginIn = Body(...)):
     """
-    Auth via Twilio Sync in the target subaccount:
-    - Locate subaccount by FriendlyName
-    - Ensure/locate Sync Service (unique_name='mlg-auth') and Map 'admins'
-    - Read record (Map key=username; fallback to Document 'admin:{username}')
-    - bcrypt verify
+    Accepts either:
+      - FriendlyName (exact match)
+      - Account SID (ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx)
+    Then authenticates against Sync Service 'mlg-auth' → Sync Map 'admins' (key=username),
+    falling back to legacy Document 'admin:{username}'.
     """
     if not subaccount:
         raise HTTPException(400, "subaccount is required")
 
-    root = twilio_client_for()  # main account
-    sa = find_subaccount_by_name(root, subaccount)
+    root = twilio_client_for()
+
+    # Resolve subaccount
+    if AC_SID_RX.match(subaccount):
+        sa = get_subaccount_by_sid(root, subaccount)
+    else:
+        sa = find_subaccount_by_name(root, subaccount)
+
     if not sa:
         raise HTTPException(404, f"Subaccount '{subaccount}' not found")
 
@@ -239,8 +218,6 @@ def list_admin_users(ctx: dict = Depends(get_current)):
     service_sid = get_or_create_sync_service(client)
     ensure_sync_map(client, service_sid)
     out: List[AdminUserOut] = []
-
-    # Primary: map items
     try:
         for item in client.sync.v1.services(service_sid).sync_maps(SYNC_MAP_UNIQUE_NAME).sync_map_items.stream():
             data = item.data or {}
@@ -255,8 +232,6 @@ def list_admin_users(ctx: dict = Depends(get_current)):
             return out
     except Exception:
         pass
-
-    # Fallback: legacy documents starting with admin:
     for doc in client.sync.v1.services(service_sid).documents.stream():
         if (doc.unique_name or "").startswith("admin:"):
             data = doc.data or {}
@@ -287,9 +262,6 @@ def create_admin_user(item: AdminUserIn, ctx: dict = Depends(get_current)):
 # --------------------------
 @app.get("/twilio/numbers")
 def list_numbers(ctx: dict = Depends(get_current)):
-    """
-    List IncomingPhoneNumbers for the subaccount.
-    """
     client = twilio_client_for(ctx["subaccount_sid"])
     items = []
     for n in client.incoming_phone_numbers.stream():

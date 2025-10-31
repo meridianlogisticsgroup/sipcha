@@ -1,10 +1,11 @@
 import axios from "axios";
 
-// In nginx the API is on the same host; change via VITE_API_URL if needed
-const API_URL =
+// Prefer same-origin reverse proxy (/api)
+// Overridable with VITE_API_URL or window.__API_URL__
+const API_URL: string =
   (import.meta as any).env?.VITE_API_URL ||
-  window.__API_URL__ ||
-  `${window.location.origin.replace(/:\d+$/, ":8000")}`;
+  (window as any).__API_URL__ ||
+  "/api";
 
 export const api = axios.create({ baseURL: API_URL });
 
@@ -23,6 +24,7 @@ export function getSubaccountFromURL(): string | null {
 }
 
 export async function login(subaccount: string, username: string, password: string) {
+  // works for both FriendlyName and SID
   const res = await api.post(`/auth/login?subaccount=${encodeURIComponent(subaccount)}`, { username, password });
   const { access_token } = res.data;
   localStorage.setItem("token", access_token);
@@ -30,5 +32,11 @@ export async function login(subaccount: string, username: string, password: stri
   return res.data;
 }
 
-export function logout() { localStorage.removeItem("token"); localStorage.removeItem("subaccount"); }
-export function isAuthed() { return !!localStorage.getItem("token"); }
+export function logout() {
+  localStorage.removeItem("token");
+  localStorage.removeItem("subaccount");
+}
+
+export function isAuthed() {
+  return !!localStorage.getItem("token");
+}
