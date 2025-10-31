@@ -25,7 +25,9 @@ services:
       start_period: 10s
     networks: [dokploy-network]
     expose:
-      - "8000"   # internal-only; Dokploy/Traefik will proxy to this
+      - "8000"   # internal-only for Dokploy/Traefik
+    ports:
+      - ":8000"  # publish to a random host port -> container 8000 (handy for direct testing)
 
   web-build:
     image: node:20-bookworm-slim
@@ -70,7 +72,9 @@ services:
       retries: 5
     networks: [dokploy-network]
     expose:
-      - "80"     # internal-only; Dokploy/Traefik will proxy to this
+      - "80"     # internal-only for Dokploy/Traefik
+    ports:
+      - ":80"    # publish to a random host port -> container 80 (handy for direct testing)
 
 networks:
   dokploy-network:
