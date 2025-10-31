@@ -8,7 +8,7 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from jose import jwt, JWTError
 from passlib.hash import bcrypt
 from pydantic import BaseModel, Field
-from fastapi.responses import PlainTextResponse, JSONResponse, FileResponse, Response
+from fastapi.responses import PlainTextResponse, FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from twilio.rest import Client
@@ -57,16 +57,20 @@ class MeOut(BaseModel):
     subaccount_sid: str
     subaccount_name: str
     username: str
+    roles: List[str] = Field(default_factory=list)
+    phone: Optional[str] = None
 
 class AdminUserIn(BaseModel):
     username: str
     password: str
     roles: List[str] = Field(default_factory=lambda: ["admin"])
+    phone: Optional[str] = None
 
 class AdminUserOut(BaseModel):
     username: str
     roles: List[str]
     updated_at: Optional[str] = None
+    phone: Optional[str] = None
 
 # ==========================
 # Helpers: Subaccount & Sync
@@ -105,7 +109,7 @@ def get_or_create_sync_service(client: Client) -> str:
     sid = get_or_attach_existing_sync_service(client)
     if sid:
         return sid
-    # Create consistently with the Function: unique_name=friendly_name="sipcha-admins"
+    # Create consistently: unique_name=friendly_name="sipcha-admins"
     svc = client.sync.v1.services.create(unique_name="sipcha-admins", friendly_name="sipcha-admins")
     return svc.sid
 
@@ -123,7 +127,7 @@ def read_admin_user(client: Client, service_sid: str, username: str) -> Optional
             return mitem.data
     except Exception:
         pass
-    # As a fallback, just in case data was written into a different service, scan others quickly.
+    # As a fallback, scan others quickly in case data was written into a different service.
     try:
         for svc in client.sync.v1.services.stream():
             try:
@@ -194,7 +198,7 @@ def login(subaccount: str = Query(..., description="Subaccount FriendlyName or A
 
     sub_client = twilio_client_for(sa["sid"])
 
-    # <<< IMPORTANT: align with Function >>>
+    # Align with Function / existing data
     service_sid = get_or_create_sync_service(sub_client)  # prefers/uses "sipcha-admins"
     ensure_sync_map(sub_client, service_sid)
 
@@ -211,12 +215,23 @@ def login(subaccount: str = Query(..., description="Subaccount FriendlyName or A
     if not isinstance(roles, list):
         roles = ["admin"]
 
+    # Auto-promote seed 'admin' to superadmin if not already
+    if body.username == "admin" and "superadmin" not in roles:
+        roles = sorted(list(set(roles + ["superadmin", "admin"])))
+        updated = dict(rec)
+        updated["roles"] = roles
+        # normalize key name for hash on write
+        if "passwordHash" in updated and "password_hash" not in updated:
+            updated["password_hash"] = updated["passwordHash"]
+        write_admin_user(sub_client, service_sid, body.username, updated)
+
     token = create_access_token(
         {
             "subaccount_sid": sa["sid"],
             "subaccount_name": sa["friendly_name"],
             "username": body.username,
             "roles": roles or ["admin"],
+            "phone": rec.get("phone"),
         }
     )
     return TokenOut(access_token=token)
@@ -227,6 +242,8 @@ def me(ctx: dict = Depends(get_current)):
         subaccount_sid=ctx["subaccount_sid"],
         subaccount_name=ctx["subaccount_name"],
         username=ctx["username"],
+        roles=ctx.get("roles", []),
+        phone=ctx.get("phone"),
     )
 
 @api_app.get("/admin/users", response_model=List[AdminUserOut])
@@ -243,6 +260,7 @@ def list_admin_users(ctx: dict = Depends(get_current)):
                     username=item.key,
                     roles=data.get("roles", ["admin"]),
                     updated_at=str(getattr(item, "date_updated", "") or ""),
+                    phone=data.get("phone"),
                 )
             )
         if out:
@@ -256,14 +274,26 @@ def create_admin_user(item: AdminUserIn, ctx: dict = Depends(get_current)):
     client = twilio_client_for(ctx["subaccount_sid"])
     service_sid = get_or_create_sync_service(client)
     ensure_sync_map(client, service_sid)
+
+    # Be lenient if UI posts a comma-separated string for roles
+    roles: List[str]
+    if isinstance(item.roles, list):
+        roles = item.roles
+    elif isinstance(item.roles, str):
+        parts = [p.strip() for p in item.roles.split(",")]
+        roles = [p for p in parts if p] or ["admin"]
+    else:
+        roles = ["admin"]
+
     payload = {
         # write snake_case; Function writes camelCase — login accepts both
         "password_hash": bcrypt.hash(item.password),
-        "roles": item.roles,
+        "roles": roles,
         "updated_at": datetime.utcnow().isoformat() + "Z",
+        "phone": (item.phone or "").strip() or None,
     }
     write_admin_user(client, service_sid, item.username, payload)
-    return AdminUserOut(username=item.username, roles=item.roles, updated_at=payload["updated_at"])
+    return AdminUserOut(username=item.username, roles=roles, updated_at=payload["updated_at"], phone=payload["phone"])
 
 @api_app.get("/twilio/numbers")
 def list_numbers(ctx: dict = Depends(get_current)):

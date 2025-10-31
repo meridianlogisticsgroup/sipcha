@@ -12,6 +12,7 @@ import SipDomains from "./pages/SipDomains";
 import AdminUsers from "./pages/AdminUsers";
 import { isAuthed } from "./auth";
 import Sidebar from "./components/Sidebar";
+import RequireNotSuper from "./components/RequireNotSuper";
 
 const Protected: React.FC<{ children: React.ReactNode }> = ({ children }) =>
   isAuthed() ? <>{children}</> : <Navigate to={"/login" + window.location.search} />;
@@ -37,7 +38,7 @@ const App: React.FC = () => {
               element={
                 <Authenticated fallback={<Navigate to={"/login" + window.location.search} />}>
                   <Protected>
-                    <Dashboard />
+                    <RequireNotSuper><Dashboard /></RequireNotSuper>
                   </Protected>
                 </Authenticated>
               }
@@ -46,7 +47,7 @@ const App: React.FC = () => {
               path="/numbers"
               element={
                 <Protected>
-                  <Numbers />
+                  <RequireNotSuper><Numbers /></RequireNotSuper>
                 </Protected>
               }
             />
@@ -54,7 +55,7 @@ const App: React.FC = () => {
               path="/sip-domains"
               element={
                 <Protected>
-                  <SipDomains />
+                  <RequireNotSuper><SipDomains /></RequireNotSuper>
                 </Protected>
               }
             />

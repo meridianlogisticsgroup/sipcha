@@ -4,7 +4,7 @@ import { api } from "../auth";
 
 const { Title } = Typography;
 
-type Row = { username: string; roles: string[]; updated_at?: string };
+type Row = { username: string; roles: string[]; updated_at?: string; phone?: string };
 
 const AdminUsers: React.FC = () => {
   const [rows, setRows] = useState<Row[]>([]);
@@ -56,6 +56,7 @@ const AdminUsers: React.FC = () => {
         dataSource={rows}
         columns={[
           { title: "Username", dataIndex: "username" },
+          { title: "Phone", dataIndex: "phone" },
           {
             title: "Roles",
             dataIndex: "roles",
@@ -69,6 +70,17 @@ const AdminUsers: React.FC = () => {
         <Form layout="vertical" form={form}>
           <Form.Item name="username" label="Username" rules={[{ required: true }]}><Input /></Form.Item>
           <Form.Item name="password" label="Password" rules={[{ required: true }]}><Input.Password /></Form.Item>
+          <Form.Item
+            name="phone"
+            label="Phone (E.164)"
+            tooltip="e.g. +16045551234"
+            rules={[
+              { required: true, message: "Phone is required for SMS 2FA/reset" },
+              { pattern: /^\+[1-9]\d{6,14}$/, message: "Must be E.164 format, e.g. +16045551234" },
+            ]}
+          >
+            <Input placeholder="+16045551234" />
+          </Form.Item>
           <Form.Item name="roles" label="Roles (comma separated)" tooltip="default: admin">
             <Input placeholder="admin" onBlur={(e) => {
               const v = e.target.value?.trim();
