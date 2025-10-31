@@ -159,8 +159,8 @@ app.add_middleware(
 # ---- Mount built SPA assets (built into /app/static by web-build) ----
 STATIC_DIR = pathlib.Path("/app/static")
 ASSETS_DIR = STATIC_DIR / "assets"
-if ASSETS_DIR.exists():
-    app.mount("/assets", StaticFiles(directory=str(ASSETS_DIR)), name="assets")
+# Mount even if it doesn't exist yet; it will work as soon as the build writes files.
+app.mount("/assets", StaticFiles(directory=str(ASSETS_DIR), check_dir=False), name="assets")
 
 # ---- Sub-app for the JSON API under /api ----
 api_app = FastAPI(title="SIPCHA API")
